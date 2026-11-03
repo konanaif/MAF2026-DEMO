@@ -1,0 +1,24 @@
+{% extends "compare_metric.html" %}
+
+{% block body_content %}
+{{ block.super }}
+<h2>ALINCredit summary (proposed model)</h2>
+<section>
+	<ul class="alt">
+		<li><b>Accuracy (macro)</b>: {{ summary.macro_acc|floatformat:2 }} %</li>
+		<li><b>DEO ×100</b>: {{ summary.deo_x100|floatformat:2 }}</li>
+		<li><b>Policy drop</b>: {{ summary.policy_drop|floatformat:2 }} %</li>
+		<li><b>Threshold</b>: {{ summary.threshold|floatformat:2 }}</li>
+	</ul>
+	<div class="table-wrapper">
+		<table>
+			<thead><tr><th>Dataset</th><th>Test accuracy (%)</th></tr></thead>
+			<tbody>
+			{% for name, acc in summary.per_dataset_acc.items %}
+				<tr><td>{{ name }}</td><td>{{ acc|floatformat:2 }}</td></tr>
+			{% endfor %}
+			</tbody>
+		</table>
+	</div>
+</section>
+{% endblock %}
