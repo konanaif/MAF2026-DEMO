@@ -71,10 +71,24 @@
 						<span><a href="https://archive.ics.uci.edu/ml/datasets/adult" target="_blank">Learn more</a></span>
 						</div>
 					</li>
+					<li>
+						<div class="col-4 col-12-small">
+							<input type="radio" id="credit_union" name="data_name" value="credit_union">
+							<label for="credit_union">Credit Union (8 public credit datasets)</label>
+						</div>
+						<div class="description">
+							<span class="definition">Predict credit risk on 8 public credit datasets (German, LendingClub, Taiwan, Prosper, HomeCredit, HMEQ, CreditApproval, Australian) merged into one union feature space.</span>
+							<br><br>
+							<span class="definition">Protected Attributes:</span><br>
+							- <b>Sex</b>, privileged: <b><i>Male</i></b>, unprivileged: <b><i>Female</i></b> (German, Taiwan, HomeCredit only)<br>
+							<span>Supported algorithm: <b>ALINCredit</b> only. t-SNE is not available.</span>
+							<br><br>
+						</div>
+					</li>
 				</ul>
 			<h2>Option</h2>
 				<div class="col-12">
-					<input type="submit" onclick="tsneSubmitForm()" value="Check t-SNE (sample_size=50)" class="primary" />
+					<input type="submit" onclick="return tsneSubmitForm()" value="Check t-SNE (sample_size=50)" class="primary" />
 				</div>
 				<br>
 				<div class="col-12">
@@ -85,13 +99,17 @@
 <script>
 	function tsneSubmitForm(){
 		const selectedData = document.querySelector('input[name="data_name"]:checked');
-		if (selectedData){
-			document.getElementById('metricForm').action = '/app/metric/tabular/'+selectedData.value+'/';
-			document.getElementById('metricForm').submit();
-		}
-		else{
+		if (!selectedData){
 			alert("Please select an option before submitting.");
+			return false;
 		}
+		if (selectedData.value === 'credit_union'){
+			alert("t-SNE is not available for Credit Union. Please select a mitigation algorithm.");
+			return false;
+		}
+		document.getElementById('metricForm').action = '/app/metric/tabular/'+selectedData.value+'/';
+		document.getElementById('metricForm').submit();
+		return false;
 	}
 	function selectAlgoSubmitForm(){
 		const selectedData = document.querySelector('input[name="data_name"]:checked');

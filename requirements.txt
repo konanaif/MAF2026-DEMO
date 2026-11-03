@@ -111,3 +111,5 @@ POT==0.9.4
 torchvision==0.19.1
 pre-commit==3.2.2
 black==22.3.0
+lightgbm==4.6.0
+xlrd==2.0.2

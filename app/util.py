@@ -163,6 +163,11 @@ def load_algorithm(data_name: str, algorithm_name: str):
         return inprocessing.grid_search_reduction.GridSearchReduction(
             dataset_name=data_name, protected="sex"
         )
+    if algorithm_name == ALGORITHM_NAME2ID["ALINCredit"]:
+        return inprocessing.alincredit.ALINCredit(
+            dataset_name=data_name, protected="sex", n_jobs=8
+        )
+
     if algorithm_name == ALGORITHM_NAME2ID["sIPMLFR"]:
         return inprocessing.sipm_lfr.SIPMLFR(dataname=data_name)
 

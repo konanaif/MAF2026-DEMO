@@ -11,6 +11,21 @@
 	</section>
 	<section>
 		<form id="algorithmForm" method="post" enctype="multipart/form-data">
+		{% if data_name == "credit_union" %}
+			<h2>Inprocessing</h2>
+				<ul class="alt">
+					<li>
+						<div class="col-4 col-12-small">
+							<input type="radio" id="{{ ALINCredit }}" name="algorithm" value="{{ ALINCredit }}" checked>
+							<label class="tooltip" for="{{ ALINCredit }}">ALINCredit
+								<span class="tooltiptext tooltip-right">
+									ALINCredit is a fairness-aware credit scoring algorithm that jointly trains on eight public credit datasets integrated into a unified feature space comprising 106 features. It uses a tree ensemble (HistGradientBoosting + LightGBM) trained with reweighing weights, excludes gender from the input features, and applies a single threshold selected on the validation split to satisfy the DEO constraint.
+								</span>
+							</label>
+						</div>
+					</li>
+				</ul>
+		{% else %}
 			<h2>Preprocessing</h2>
 				<ul class="alt">
 					<li>
@@ -129,6 +144,16 @@
 					</li>
 					<li>
 						<div class="col-4 col-12-small">
+							<input type="radio" id="{{ ALINCredit }}" name="algorithm" value="{{ ALINCredit }}">
+							<label class="tooltip" for="{{ ALINCredit }}">ALINCredit
+								<span class="tooltiptext tooltip-right">
+									ALINCredit is a fairness-aware credit scoring algorithm that jointly trains on eight public credit datasets integrated into a unified feature space comprising 106 features. It uses a tree ensemble (HistGradientBoosting + LightGBM) trained with reweighing weights, excludes gender from the input features, and applies a single threshold selected on the validation split to satisfy the DEO constraint.
+								</span>
+							</label>
+						</div>
+					</li>
+					<li>
+						<div class="col-4 col-12-small">
 								<input type="radio" id="{{KernerlDensityEstimation}}" name="algorithm" value="{{KernerlDensityEstimation}}">
 								<label class="tooltip" for="{{KernerlDensityEstimation}}">Kernel density estimation
 									<span class="tooltiptext tooltip-right">
@@ -213,7 +238,7 @@
 						</div>
 					</li>
 				</ul>
-
+			{% endif %}
 			<!-- Submit button -->
 				<div class="col-12">
 					<input type="submit" onclick="selectAlgSubmitForm()" value="Mitigation start" class="primary" />

@@ -18,6 +18,7 @@ ALGORITHM_NAME2ID = {
     "GridSearchReduction": "gsr",
     "AdversarialDebiasing": "ad",
     "sIPMLFR": "sipmlfr",
+    "ALINCredit": "alincredit",
     # postprocessing
     "CalibratedEqOdds": "ceo",
     "EqualizedOdds": "eo",

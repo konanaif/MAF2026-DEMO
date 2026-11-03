@@ -61,6 +61,8 @@ def select_action_per_datatype(request, data_type):
 
 @csrf_exempt
 def load_metric(request, data_type, data_name):
+    if data_name == "credit_union":
+        return redirect(f"/app/algorithm/tabular/{data_name}/")
     return render(
         request,
         "metrics_loading.html",
@@ -70,6 +72,8 @@ def load_metric(request, data_type, data_name):
 
 @csrf_exempt
 def get_data_metric(request, data_type, data_name):
+    if data_name == "credit_union":
+        return redirect(f"/app/algorithm/tabular/{data_name}/")
     if data_type == "tabular":
         return render(request, "metrics.html", get_tabular_data_metric(data_name))
     if data_type == "image":
@@ -153,6 +157,22 @@ def get_mitigation_result(request, data_name: str, algorithm_name: str):
                 "algorithm_name": algorithm_name,
                 "data_name" : data_name,
                 "result": result,
+            },
+        )
+    
+    if algorithm_name == "alincredit":
+        model = load_algorithm(data_name, algorithm_name)
+        original_metrics_result, miti_result = model.run()
+        return render(
+            request,
+            f"algorithm/{algorithm_name}.html",
+            {
+                "data_name": data_name,
+                "algorithm_name": ALGORITHM_ID2NAME[algorithm_name],
+                "protected_attribute": "sex",
+                "original": original_metrics_result,
+                "mitigated": miti_result,
+                "summary": model.summary,
             },
         )
 
