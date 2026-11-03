@@ -12,7 +12,23 @@
 </section>
 <section>
 	<form id="algorithmForm" method="post" enctype="multipart/form-data">
+		{% if data_name == "four_findings" %}
+		<h2>Preprocessing</h2>
+			<ul class="alt">
+				<li>
+					<div class="col-4 col-12-small">
+							<input type="radio" id="{{SubgroupBalancedResampling}}" name="algorithm" value="{{SubgroupBalancedResampling}}" checked>
+							<label class="tooltip" for="{{SubgroupBalancedResampling}}">
+								ALINMed
+								<span class="tooltiptext tooltip-right">
+									ALINMed is an algorithm designed to reduce gender-based disparities in prediction performance for AI-based pneumothorax diagnosis using chest X-rays. It balances the training data across (label × gender) groups using WeightedRandomSampler, ensuring that underrepresented groups are adequately represented during training.
+								</span></label>
+					</div>
+				</li>
+			</ul>
+		{% else %}
 		<h2>Inprocessing</h2>
+		{% endif %}
 			<ul class="alt">
 				{% if data_name == "celeba" %}
 				<li>

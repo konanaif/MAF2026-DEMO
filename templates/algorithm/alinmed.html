@@ -1,0 +1,13 @@
+{% extends "compare_metric.html" %}
+
+{% block body_content %}
+{{ block.super }}
+<h2>ALINMed summary (Subgroup Balanced Resampling)</h2>
+<section>
+	<ul class="alt">
+		<li><b>Accuracy (baseline → mitigated)</b>: {{ summary.acc_nofair }} % → {{ summary.acc_fair }} % (target ≥ 94)</li>
+		<li><b>DEO</b>: {{ summary.deo }} % (target ≤ 5)</li>
+		<li><b>Policy drop</b>: {{ summary.policy_drop }} % (target ≤ 3)</li>
+	</ul>
+</section>
+{% endblock %}
