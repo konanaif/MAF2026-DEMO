@@ -31,6 +31,7 @@ ALGORITHM_NAME2ID = {
     "FairnessVAE": "fvae",
     "LearningFromFairness": "lff",
     "DMLBG": "dmlbg",
+    "SubgroupBalancedResampling": "sbr",
     # audio
     "INTapt": "intapt",
     "FairASR": "fairasr",

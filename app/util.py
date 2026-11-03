@@ -114,6 +114,10 @@ def load_algorithm(data_name: str, algorithm_name: str):
         return preprocessing.fair_batch.FairBatch(
             dataset_name=data_name, protected="sex"
         )
+    if algorithm_name == ALGORITHM_NAME2ID["SubgroupBalancedResampling"]:
+        return preprocessing.subgroup_balanced_resampling.SubgroupBalancedResampling(
+            dataset_name=data_name, protected="sex"
+        )
     if algorithm_name == ALGORITHM_NAME2ID["SLIDE"]:
         return inprocessing.slide.SlideFairClassifier(
             dataset_name=data_name, protected="sex"
