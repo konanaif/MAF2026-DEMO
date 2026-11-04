@@ -192,6 +192,18 @@
 								</label>
 						</div>
 					</li>
+					{% if data_name == "adult" or data_name == "german" %}
+					<li>
+						<div class="col-4 col-12-small">
+								<input type="radio" id="{{DRAF}}" name="algorithm" value="{{DRAF}}">
+								<label class="tooltip" for="{{DRAF}}">DRAF
+									<span class="tooltiptext tooltip-right">
+										DRAF (Doubly-Regressing Approach for Subgroup Fairness) is a fair classification algorithm that learns to reduce differences in prediction distributions across subgroups formed by intersecting multiple sensitive attributes. Even when there are many subgroups and some have limited samples, it uses an adversarial regression penalty to jointly learn fairness across all subgroups.
+									</span>
+								</label>
+						</div>
+					</li>
+					{% endif %}
 					{% if data_name == "compas" %}
 					<li>
 						<div class="col-4 col-12-small">

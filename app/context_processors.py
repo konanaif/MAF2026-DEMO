@@ -19,6 +19,7 @@ ALGORITHM_NAME2ID = {
     "AdversarialDebiasing": "ad",
     "sIPMLFR": "sipmlfr",
     "ALINCredit": "alincredit",
+    "DRAF": "draf",
     # postprocessing
     "CalibratedEqOdds": "ceo",
     "EqualizedOdds": "eo",
