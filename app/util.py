@@ -174,6 +174,11 @@ def load_algorithm(data_name: str, algorithm_name: str):
 
     if algorithm_name == ALGORITHM_NAME2ID["sIPMLFR"]:
         return inprocessing.sipm_lfr.SIPMLFR(dataname=data_name)
+    
+    if algorithm_name == ALGORITHM_NAME2ID["DRAF"]:
+        return inprocessing.draf.DRAF(
+            dataset_name=data_name, protected="sex"
+        )
 
     if algorithm_name == ALGORITHM_NAME2ID["CalibratedEqOdds"]:
         return postprocessing.calibrated_eq_odds.CalibratedEqOdds(
@@ -187,3 +192,4 @@ def load_algorithm(data_name: str, algorithm_name: str):
         return postprocessing.reject_option_classification.RejectOptionClassifier(
             dataset_name=data_name, protected="sex"
         )
+    
