@@ -77,7 +77,7 @@ openai==1.35.3
 jsonlines==4.0.0
 spacy==3.7.5
 anthropic==0.2.10
-transformers==4.30.0
+transformers==4.56.0
 nltk
 datasets
 sentencepiece
@@ -113,3 +113,6 @@ pre-commit==3.2.2
 black==22.3.0
 lightgbm==4.6.0
 xlrd==2.0.2
+peft==0.17.1
+timm==1.0.15
+concept-erasure @ git+https://github.com/EleutherAI/concept-erasure.git@9f51753821316a1edacf78b52b464ab26d40e60a

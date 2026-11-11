@@ -4,6 +4,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse
 import numpy as np
 
+import json
+import logging
 import os
 from .util import *
 from .context_processors import ALGORITHM_ID2NAME, ALGORITHM_NAME2ID
@@ -15,8 +17,55 @@ import MAF.algorithms.postprocessing as postprocessing
 from MAF.benchmark.crehate.crehate_demo import check_hatespeech
 from MAF.benchmark.kobbq.kobbq_demo import check_korean_bias, KoBBQArguments
 from MAF.benchmark.bbg.bbg_demo import BBGArguments, run_bbg_pipeline
+from MAF.algorithms.inprocessing.kobbq_steer.demo import compare_sample
 
 from MAF.metric.latte.check_toxicity import check_toxicity
+
+
+def _kobbq_steer_summary():
+    path = os.environ["PYTHONPATH"] + "/MAF/result/kobbq_steer/qwen2.5-7b/summary.json"
+    if not os.path.exists(path):
+        return None, []
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        metric_keys = ["kobbq_amb_acc", "kobbq_dis_acc", "bias_amb", "bias_dis"]
+        if "kmmlu_acc" in d["base"]:
+            metric_keys += ["kmmlu_acc", "rel_drop"]
+        summary = {"base": d["base"], "alphasteer": d["alphasteer"]}
+        for cond in summary.values():
+            missing = [k for k in metric_keys if k not in cond]
+            if missing:
+                raise KeyError(missing)
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        logging.getLogger(__name__).warning("unreadable summary %s: %r", path, e)
+        return None, []
+    return summary, metric_keys
+
+
+def _kobbq_steer_rows(result):
+    if result is None:
+        return []
+
+    def mark(pred_idx, target):
+        if target is None:
+            return "-"
+        return "✓" if pred_idx == target else "✗"
+
+    rows = []
+    for cond in ("base", "alphasteer"):
+        r = result[cond]
+        rows.append(
+            {
+                "cond": cond,
+                "letter": "ABC"[r["pred_idx"]],
+                "pred_text": r["pred_text"],
+                "probs": r["probs"],
+                "answer_mark": mark(r["pred_idx"], result.get("answer_idx")),
+                "biased_mark": mark(r["pred_idx"], result.get("biased_idx")),
+            }
+        )
+    return rows
 
 
 def index(request):
@@ -301,7 +350,17 @@ def processing_text_algorithms(request, algorithm_name: str):
             request.session["biased_answer"] = request.POST.get("biased_answer")
             request.session["answer"] = request.POST.get("answer")
             return render(request, "text_mitigation_loading.html")
-        
+
+    if algorithm_name == "kobbqsteer":
+        if request.method == "POST":
+            choices = [c.strip() for c in request.POST.get("choices", "").split(",")]
+            request.session["context"] = request.POST.get("context")
+            request.session["question"] = request.POST.get("question")
+            request.session["choices"] = [c for c in choices if c]
+            request.session["answer"] = request.POST.get("answer") or None
+            request.session["biased_answer"] = request.POST.get("biased_answer") or None
+            return render(request, "text_mitigation_loading.html")
+
     if algorithm_name == "bbg":
         if request.method == "POST":
             request.session["category"] = request.POST.get("category")
@@ -408,6 +467,40 @@ def show_text_algorithm_result(request, algorithm_name: str):
         )
         result = check_korean_bias(model_name=model, data_args=args)
         return render(request, html_path, {"result": result})
+
+    if algorithm_name == "kobbqsteer":
+        keys = ("context", "question", "choices", "answer", "biased_answer")
+        kwargs = {k: request.session.get(k) for k in keys}
+        result, error = None, None
+        if not (kwargs["choices"] and kwargs["context"] and kwargs["question"]):
+            error = "입력이 없습니다. 입력 페이지에서 다시 시작해 주세요."
+        else:
+            try:
+                result = compare_sample(**kwargs)
+            except (ValueError, OSError, RuntimeError) as e:
+                error = str(e)
+        summary, metric_keys = _kobbq_steer_summary()
+        summary_rows = (
+            [
+                {"cond": c, "values": [summary[c][k] for k in metric_keys]}
+                for c in ("base", "alphasteer")
+            ]
+            if summary is not None
+            else []
+        )
+        return render(
+            request,
+            html_path,
+            {
+                "result": result,
+                "error": error,
+                "inputs": {k: kwargs[k] for k in ("context", "question", "choices")},
+                "summary": summary,
+                "metric_keys": metric_keys,
+                "rows": _kobbq_steer_rows(result),
+                "summary_rows": summary_rows,
+            },
+        )
 
     if algorithm_name == "bbg":
         category = request.session.get("category")
