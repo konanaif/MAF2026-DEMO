@@ -1,0 +1,90 @@
+{% extends "common/base.html" %}
+{% load static %}
+
+{% block header_content %}
+	<ul>
+		<li><a href="/app">Home</a></li>
+		<li><a href="/app/datatype">Data</a></li>
+		<li><a href="#">Metrics</a></li>
+		<li><a href="#">Algorithms</a></li>
+		<li><a href="#" class="active">Result</a></li>
+	</ul>
+{% endblock %}
+
+{% block body_content %}
+<h1 class="major">KoBBQ-Steer Results</h1>
+{% if error %}
+	<section>
+		<p><b>실행할 수 없습니다.</b> {{ error }}</p>
+		<p><a href="/app/text/mitigation/kobbqsteer/getdata/" class="button">다시 입력</a></p>
+	</section>
+{% else %}
+	<section>
+		<ul class="alt">
+			<li><b>문맥</b>: {{ inputs.context }}</li>
+			<li><b>질문</b>: {{ inputs.question }}</li>
+			<li><b>선택지</b>: A: {{ result.options.0 }} / B: {{ result.options.1 }} / C: {{ result.options.2 }}</li>
+		</ul>
+	</section>
+
+	<h3 class="major">Sample Comparison</h3>
+	<table>
+		<thead>
+			<tr>
+				<th>조건</th>
+				<th>예측</th>
+				<th>P(A)</th>
+				<th>P(B)</th>
+				<th>P(C)</th>
+				<th>정답</th>
+				<th>고정관념</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% for r in rows %}
+			<tr>
+				<td><b>{{ r.cond }}</b></td>
+				<td>{{ r.letter }}: {{ r.pred_text }}</td>
+				<td>{{ r.probs.0|floatformat:4 }}</td>
+				<td>{{ r.probs.1|floatformat:4 }}</td>
+				<td>{{ r.probs.2|floatformat:4 }}</td>
+				<td>{{ r.answer_mark }}</td>
+				<td>{{ r.biased_mark }}</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+	P(A)·P(B)·P(C)는 세 선택지 문자 A, B, C 의 로짓만 softmax 로 정규화한 값입니다(합 1). 정답·고정관념 열은 입력한 답변과 예측이 같으면 ✓, 다르면 ✗, 입력하지 않았으면 - 입니다.
+	<p>
+	<h3 class="major">Full Evaluation (KoBBQ test)</h3>
+	{% if summary_rows %}
+	<table>
+		<thead>
+			<tr>
+				<th>조건</th>
+				{% for k in metric_keys %}<th>{{ k }}</th>{% endfor %}
+			</tr>
+		</thead>
+		<tbody>
+			{% for r in summary_rows %}
+			<tr>
+				<td><b>{{ r.cond }}</b></td>
+				{% for v in r.values %}<td>{{ v|floatformat:4 }}</td>{% endfor %}
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+	KoBBQ 문항은 고정관념 대상, 그 반대 대상(anti), '알 수 없음' 세 선택지로 이루어지며, 문맥은 두 종류입니다. <b>모호(amb)</b> 문맥은 답의 근거가 없어 정답이 항상 '알 수 없음'이고, <b>명확(dis)</b> 문맥은 근거가 있어 정답이 특정 인물이며, 근거가 고정관념과 같은 방향(biased)인 문항과 반대 방향(counter-biased)인 문항으로 다시 나뉩니다.
+	<ul class="alt">
+		<li><b>kobbq_amb_acc</b>: 모호 문맥에서 '알 수 없음'을 고른 비율. 높을수록 좋습니다. 근거가 없을 때 추측하지 않는 능력입니다.</li>
+		<li><b>kobbq_dis_acc</b>: 명확 문맥에서 정답을 맞힌 비율. 높을수록 좋습니다. 문맥을 읽고 답하는 능력입니다.</li>
+		<li><b>bias_amb</b>: 모호 문맥에서 고정관념 대상을 고른 비율 − anti 를 고른 비율로, 0에 가까울수록 편향되지 않았음을 의미합니다. </li>
+		<li><b>bias_dis</b>: 명확 문맥에서 biased 문항 정답률 − counter-biased 문항 정답률로, 0 이 이상적인 값이니다. 양수면 고정관념과 맞는 답은 잘 맞히고 반대 답은 놓친 것입니다.</li>
+		<li><b>kmmlu_acc</b>: 한국어 지식 벤치마크 KMMLU 정답률. 스티어링이 모델의 일반적인 능력을 깎지 않았는지 확인하는 지표입니다.</li>
+		<li><b>rel_drop</b>: (base 의 kmmlu_acc − 해당 조건의 kmmlu_acc) ÷ base 의 kmmlu_acc × 100 (%). 0에 가까우면 능력이 보존된 것이고, base 행은 정의상 값이 0이며, 음수면 성능이 향상된 것입니다.</li>
+	</ul>
+	{% else %}
+	<p>전량 평가 결과 파일이 없어 표를 생략합니다.</p>
+	{% endif %}
+{% endif %}
+{% endblock %}
