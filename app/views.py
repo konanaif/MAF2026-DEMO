@@ -4,9 +4,16 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse
 import numpy as np
 
+import datetime
 import json
 import logging
 import os
+import signal
+import subprocess
+import sys
+import threading
+import time
+import zoneinfo
 from .util import *
 from .context_processors import ALGORITHM_ID2NAME, ALGORITHM_NAME2ID
 
@@ -17,7 +24,17 @@ import MAF.algorithms.postprocessing as postprocessing
 from MAF.benchmark.crehate.crehate_demo import check_hatespeech
 from MAF.benchmark.kobbq.kobbq_demo import check_korean_bias, KoBBQArguments
 from MAF.benchmark.bbg.bbg_demo import BBGArguments, run_bbg_pipeline
-from MAF.algorithms.inprocessing.kobbq_steer.demo import compare_sample
+from MAF.algorithms.inprocessing.kobbq_steer.demo import MAX_CHARS, compare_sample
+from MAF.algorithms.postprocessing.casual_path_tracing.CausalPathTracing import (
+    DEFAULT_CPT_SAMPLES,
+    MAX_CPT_SAMPLES,
+    mitigate_cpt,
+)
+from MAF.algorithms.postprocessing.casual_path_tracing.VisionCausalPathTracing import (
+    DEFAULT_VISION_SAMPLE,
+    IMAGENET_VAL_SIZE,
+    predict_vision_cpt,
+)
 
 from MAF.metric.latte.check_toxicity import check_toxicity
 
@@ -41,6 +58,209 @@ def _kobbq_steer_summary():
         logging.getLogger(__name__).warning("unreadable summary %s: %r", path, e)
         return None, []
     return summary, metric_keys
+
+
+def _parse_cpt_indices(text):
+    """'7, 3 ,7' → [3, 7]; 빈 문자열은 기본 샘플. 형식·범위 오류는 ValueError."""
+    parts = [p.strip() for p in (text or "").split(",") if p.strip()]
+    if not parts:
+        return list(DEFAULT_CPT_SAMPLES)
+    if not all(p.isdigit() for p in parts):
+        raise ValueError("샘플 인덱스는 0 이상의 정수를 쉼표로 구분해 입력해 주세요.")
+    indices = sorted({int(p) for p in parts})
+    if len(indices) > MAX_CPT_SAMPLES:
+        raise ValueError(f"샘플은 한 번에 {MAX_CPT_SAMPLES}개까지 입력할 수 있습니다.")
+    if indices[-1] >= _KNOWN_1000_SIZE:
+        raise ValueError(
+            f"known_1000 인덱스는 0~{_KNOWN_1000_SIZE - 1} 사이여야 합니다."
+        )
+    return indices
+
+
+_KNOWN_1000_SIZE = 1209
+# 비전 추적(약 15분)은 백그라운드 스레드 1개로 직렬 실행; {idx: {"started", "error"}} 는 프로세스 수명 동안만 유지
+_VISION_JOBS = {}
+_VISION_LOCK = threading.Lock()
+
+
+def _cpt_vision_cached(sample_idx):
+    """저장된 run_* 중 이 샘플을 추적한 최신 것의 샘플별 지표; 없으면 None."""
+    root = os.path.join(
+        os.environ["PYTHONPATH"],
+        "MAF",
+        "result",
+        "casual_path_tracing",
+        "vit_tiny_patch16_224",
+    )
+    try:
+        runs = sorted(d for d in os.listdir(root) if d.startswith("run_"))
+    except OSError:
+        return None
+    for run in reversed(runs):
+        path = os.path.join(root, run, "path_forward_results", "sample_wise_union.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                r = json.load(f).get(str(sample_idx))
+            if r is None:
+                continue
+            return {
+                "run": run,
+                "path_node_ratio": float(r["path_node_ratio"]),
+                "decision_kept": bool(r["decision_kept"]),
+                "path_prediction": int(r["path_decision"]),
+            }
+        except FileNotFoundError:
+            continue  # 추적 중인 run 은 아직 결과 파일이 없다
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            logging.getLogger(__name__).warning(
+                "unreadable vision sample result %s: %r", path, e
+            )
+    return None
+
+
+_KST = zoneinfo.ZoneInfo(
+    "Asia/Seoul"
+)  # 화면에 보이는 시각은 컨테이너 시계(UTC)가 아니라 KST
+_VISION_TRACE_TIMEOUT = int(os.environ.get("CPT_VISION_TIMEOUT_SEC", 40 * 60))
+_VISION_WATCHERS = {}
+_TRACE_MODULE = (
+    "MAF.algorithms.postprocessing.casual_path_tracing.VisionCausalPathTracing"
+)
+
+
+def _watch_vision_trace(sample_idx):
+    """별도 프로세스로 추적(약 15분)을 돌리고 상한을 넘기면 죽인다.
+
+    서브프로세스인 이유: 노이즈 탐색 루프에 상한이 없어 일부 샘플은 끝나지 않고, 스레드는 죽일 수 없다.
+    CUDA 도 Django 프로세스 밖에 둬서 서버 재시작과 분리한다.
+    """
+    cmd = [
+        sys.executable,
+        "-c",
+        f"from {_TRACE_MODULE} import trace_vision_cpt; trace_vision_cpt({sample_idx})",
+    ]
+    try:
+        with _VISION_LOCK:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            try:
+                code = proc.wait(timeout=_VISION_TRACE_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                _VISION_JOBS[sample_idx]["error"] = (
+                    f"시간 초과 ({_VISION_TRACE_TIMEOUT // 60}분)"
+                )
+                return
+        if code != 0:
+            _VISION_JOBS[sample_idx]["error"] = f"종료 코드 {code}"
+            return
+    except OSError as e:
+        logging.getLogger(__name__).exception(
+            "vision trace could not start for %s", sample_idx
+        )
+        _VISION_JOBS[sample_idx]["error"] = f"프로세스 시작 실패 ({type(e).__name__})"
+        return
+    _VISION_JOBS.pop(sample_idx, None)
+
+
+_ADOPT_POLL_SEC = 10
+
+
+def _find_trace_pid(sample_idx):
+    """서버 재시작으로 고아가 된 추적 프로세스를 /proc 에서 찾는다(Linux)."""
+    marker = f"trace_vision_cpt({sample_idx})".encode()
+    try:
+        pids = [p for p in os.listdir("/proc") if p.isdigit()]
+    except OSError:
+        return None
+    for pid in pids:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                if marker in f.read():
+                    return int(pid)
+        except OSError:
+            continue
+    return None
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _process_elapsed(pid):
+    """프로세스가 시작된 뒤 지난 초(/proc/<pid>/stat 의 starttime 기준)."""
+    with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
+        fields = f.read().rsplit(")", 1)[1].split()
+    start_ticks = int(fields[19])  # 22번째 필드(starttime), ')' 뒤 기준으로 20번째
+    with open("/proc/uptime", encoding="utf-8") as f:
+        uptime = float(f.read().split()[0])
+    return uptime - start_ticks / os.sysconf("SC_CLK_TCK")
+
+
+def _adopt_vision_trace(sample_idx, pid):
+    """이전 서버 세션이 띄운 추적을 다시 감시한다: 남은 상한까지 기다리고, 넘기면 죽인다."""
+    try:
+        elapsed = _process_elapsed(pid)
+    except (OSError, ValueError, IndexError):
+        elapsed = 0.0
+    started = datetime.datetime.now(_KST) - datetime.timedelta(seconds=elapsed)
+    _VISION_JOBS[sample_idx] = {
+        "started": started.strftime("%Y-%m-%d %H:%M"),
+        "error": None,
+    }
+    deadline = time.monotonic() + max(0.0, _VISION_TRACE_TIMEOUT - elapsed)
+
+    def _watch():
+        while _pid_alive(pid):
+            if time.monotonic() >= deadline:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+                _VISION_JOBS[sample_idx]["error"] = (
+                    f"시간 초과 ({_VISION_TRACE_TIMEOUT // 60}분)"
+                )
+                return
+            time.sleep(_ADOPT_POLL_SEC)
+        _VISION_JOBS.pop(sample_idx, None)
+
+    t = threading.Thread(target=_watch, daemon=True)
+    _VISION_WATCHERS[sample_idx] = t
+    t.start()
+
+
+def _start_vision_trace(sample_idx):
+    _VISION_JOBS[sample_idx] = {
+        "started": datetime.datetime.now(_KST).strftime("%Y-%m-%d %H:%M"),
+        "error": None,
+    }
+    t = threading.Thread(target=_watch_vision_trace, args=(sample_idx,), daemon=True)
+    _VISION_WATCHERS[sample_idx] = t
+    t.start()
+
+
+def _parse_vision_index(text):
+    text = (text or "").strip()
+    if not text:
+        return DEFAULT_VISION_SAMPLE
+    if not text.isdigit() or int(text) >= IMAGENET_VAL_SIZE:
+        raise ValueError(
+            f"ImageNet val 인덱스는 0~{IMAGENET_VAL_SIZE - 1} 사이의 정수 하나여야 합니다."
+        )
+    return int(text)
+
+
+_CPT_KEYS = ("path_node_ratio", "decision_kept_ratio")
+# pythia-14m 은 작지만 result/ 디렉터리 생성·root logger 조작을 겹치지 않게 한다
+_CPT_LOCK = threading.Lock()
 
 
 def _kobbq_steer_rows(result):
@@ -112,7 +332,7 @@ def select_action_per_datatype(request, data_type):
 def load_metric(request, data_type, data_name):
     if data_name == "credit_union":
         return redirect(f"/app/algorithm/tabular/{data_name}/")
-    if data_name == "four_findings":
+    if data_name in ("four_findings", "imagenet"):
         return redirect(f"/app/algorithm/image/{data_name}/")
     return render(
         request,
@@ -123,7 +343,7 @@ def load_metric(request, data_type, data_name):
 
 @csrf_exempt
 def get_data_metric(request, data_type, data_name):
-    if data_name == "four_findings":
+    if data_name in ("four_findings", "imagenet"):
         return redirect(f"/app/algorithm/image/{data_name}/")
     if data_name == "credit_union":
         return redirect(f"/app/algorithm/tabular/{data_name}/")
@@ -154,6 +374,21 @@ def select_algorithm(request, data_type, data_name):
 
 @csrf_exempt
 def load_mitigation(request, data_name, algorithm_name):
+    if algorithm_name == "cpt":
+        # 알고리즘 선택 → 인덱스 입력 페이지 → (sample_idx 와 함께 다시 POST) → 로딩
+        form_ctx = {"result_url": request.path, "default_idx": DEFAULT_VISION_SAMPLE}
+        if "sample_idx" not in request.POST:
+            return render(request, "algorithm/get_data_cpt_vision.html", form_ctx)
+        try:
+            request.session["vision_sample_idx"] = _parse_vision_index(
+                request.POST["sample_idx"]
+            )
+        except ValueError as e:
+            return render(
+                request,
+                "algorithm/get_data_cpt_vision.html",
+                dict(form_ctx, error=str(e)),
+            )
     return render(
         request, "mitigation_loading.html", {"algorithm_name": algorithm_name}
     )
@@ -161,6 +396,61 @@ def load_mitigation(request, data_name, algorithm_name):
 
 @csrf_exempt
 def get_mitigation_result(request, data_name: str, algorithm_name: str):
+    if algorithm_name == "cpt":
+        idx = request.session.get("vision_sample_idx", DEFAULT_VISION_SAMPLE)
+        prediction, error = None, None
+        try:
+            prediction = predict_vision_cpt(idx)
+        except ValueError as e:
+            error = str(e)
+        except (OSError, RuntimeError):
+            logging.getLogger(__name__).exception("cpt predict_vision_cpt failed")
+            error = "비전판 예측에 실패했습니다. ImageNet·모델 파일과 서버 로그를 확인해 주세요."
+        cached = _cpt_vision_cached(idx) if prediction else None
+        job = _VISION_JOBS.get(idx)
+        status = "idle"
+        if prediction and cached is None:
+            if not prediction["correct"]:
+                status = "excluded"
+            elif job is None:
+                orphan = _find_trace_pid(idx)
+                if orphan:
+                    _adopt_vision_trace(idx, orphan)
+                else:
+                    _start_vision_trace(idx)
+                job, status = _VISION_JOBS.get(idx), "running"
+            elif job.get("error"):
+                status = "failed"
+            else:
+                status = "running"
+        now = datetime.datetime.now(_KST)
+        elapsed_min = None
+        if job and job.get("started"):
+            try:
+                started = datetime.datetime.strptime(
+                    job["started"], "%Y-%m-%d %H:%M"
+                ).replace(tzinfo=_KST)
+                elapsed_min = max(0, int((now - started).total_seconds() // 60))
+            except ValueError:
+                elapsed_min = None
+        return render(
+            request,
+            "algorithm/cpt.html",
+            {
+                "algorithm_name": algorithm_name,
+                "data_name": data_name,
+                "metric_keys": _CPT_KEYS,
+                "language": None,
+                "vision_index": idx,
+                "elapsed_min": elapsed_min,
+                "prediction": prediction,
+                "vision": cached,
+                "status": status,
+                "job": job,
+                "error": error,
+            },
+        )
+
     if algorithm_name == "intapt":
         result = load_audio_algorithm(algorithm_name)
         return render(
@@ -172,7 +462,7 @@ def get_mitigation_result(request, data_name: str, algorithm_name: str):
                 "perf_diff": result["perf_diff"],
             },
         )
-        
+
     if algorithm_name == "fairasr":
         result = load_audio_algorithm(algorithm_name)
         return render(
@@ -191,16 +481,19 @@ def get_mitigation_result(request, data_name: str, algorithm_name: str):
         return render(
             request,
             f"algorithm/{algorithm_name}.html",
-            {"algorithm_name": ALGORITHM_ID2NAME[algorithm_name], "result": result_pairs},
+            {
+                "algorithm_name": ALGORITHM_ID2NAME[algorithm_name],
+                "result": result_pairs,
+            },
         )
-    
+
     if algorithm_name == "dmlbg":
         result = inprocessing.dmlbg.migitage_dmlbg()
         html_path = f"algorithm/{algorithm_name}.html"
-        
+
         if isinstance(result.get("best_recalls"), np.ndarray):
             result["best_recalls"] = result["best_recalls"].tolist()
-        
+
         Ks = result.get("Ks", [1, 2, 4, 8, 16, 32])  # fallback
         result["recall_pairs"] = list(zip(Ks, result["best_recalls"]))
         return render(
@@ -208,11 +501,11 @@ def get_mitigation_result(request, data_name: str, algorithm_name: str):
             html_path,
             {
                 "algorithm_name": algorithm_name,
-                "data_name" : data_name,
+                "data_name": data_name,
                 "result": result,
             },
         )
-    
+
     if algorithm_name == "alincredit":
         model = load_algorithm(data_name, algorithm_name)
         original_metrics_result, miti_result = model.run()
@@ -228,7 +521,7 @@ def get_mitigation_result(request, data_name: str, algorithm_name: str):
                 "summary": model.summary,
             },
         )
-    
+
     if algorithm_name == "sbr":
         model = load_algorithm(data_name, algorithm_name)
         original_metrics_result, miti_result = model.run()
@@ -273,14 +566,17 @@ def get_mitigation_result(request, data_name: str, algorithm_name: str):
         },
     )
 
+
 @csrf_exempt
 def get_textdata(request, algorithm_name: str):
     import json
+
     html_path = f"algorithm/get_data_{algorithm_name}.html"
     result_url = f"/app/text/mitigation/{algorithm_name}/loading/"
 
     if algorithm_name == "bbg":
         from pathlib import Path
+
         tem_dir = os.environ["PYTHONPATH"] + "/MAF/data/bbg/KoBBG_templates.csv"
         df_templates = pd.read_csv(tem_dir)
 
@@ -290,26 +586,34 @@ def get_textdata(request, algorithm_name: str):
             stere = row["Stereotype"]
             tid = str(row["Template_ID"])
 
-            grouped_templates.setdefault(cat, {}) \
-                             .setdefault(stere, {}) \
-                             .setdefault(tid, []).append({
-                                 "Ambiguous_context": row["Ambiguous_context"],
-                                 "Disambiguating_context": row["Disambiguating_context"],
-                                 "Biased_question": row["Biased_question"],
-                                 "Counter_biased_question": row["Counter-biased_question"],
-                                 "Biased_question_answer": row["Biased_question_answer"],
-                                 "Counter_biased_question_answer": row["Counter-biased_question_answer"],
-                             })
+            grouped_templates.setdefault(cat, {}).setdefault(stere, {}).setdefault(
+                tid, []
+            ).append(
+                {
+                    "Ambiguous_context": row["Ambiguous_context"],
+                    "Disambiguating_context": row["Disambiguating_context"],
+                    "Biased_question": row["Biased_question"],
+                    "Counter_biased_question": row["Counter-biased_question"],
+                    "Biased_question_answer": row["Biased_question_answer"],
+                    "Counter_biased_question_answer": row[
+                        "Counter-biased_question_answer"
+                    ],
+                }
+            )
 
         categories = list(grouped_templates.keys())
 
-        return render(request, html_path, {
-            "algorithm": algorithm_name,
-            "result_url": result_url,
-            "categories": categories,
-            "grouped_templates_json": json.dumps(grouped_templates),
-            "result_url": result_url
-        })
+        return render(
+            request,
+            html_path,
+            {
+                "algorithm": algorithm_name,
+                "result_url": result_url,
+                "categories": categories,
+                "grouped_templates_json": json.dumps(grouped_templates),
+                "result_url": result_url,
+            },
+        )
 
     return render(
         request, html_path, {"algorithm": algorithm_name, "result_url": result_url}
@@ -319,8 +623,22 @@ def get_textdata(request, algorithm_name: str):
 @csrf_exempt
 def processing_text_algorithms(request, algorithm_name: str):
     redirect_path = f"text/mitigation/{algorithm_name}/getresult/"
-    if algorithm_name in ["concse", "cpt", "ember"]:
+    if algorithm_name in ["concse", "ember"]:
         return render(request, "text_mitigation_loading.html")
+
+    if algorithm_name == "cpt":
+        if request.method == "POST":
+            try:
+                request.session["cpt_sample_indices"] = _parse_cpt_indices(
+                    request.POST.get("sample_indices")
+                )
+            except ValueError as e:
+                return render(
+                    request,
+                    "algorithm/cpt.html",
+                    {"error": str(e), "metric_keys": _CPT_KEYS},
+                )
+            return render(request, "text_mitigation_loading.html")
 
     if algorithm_name == "rh":
         if request.method == "POST":
@@ -354,8 +672,23 @@ def processing_text_algorithms(request, algorithm_name: str):
     if algorithm_name == "kobbqsteer":
         if request.method == "POST":
             choices = [c.strip() for c in request.POST.get("choices", "").split(",")]
-            request.session["context"] = request.POST.get("context")
-            request.session["question"] = request.POST.get("question")
+            context, question = (
+                request.POST.get("context", ""),
+                request.POST.get("question", ""),
+            )
+            # 세션(DB)에 쓰기 전에 자른다; 같은 상한을 compare_sample 도 다시 검사한다
+            if (
+                len(context) > MAX_CHARS["context"]
+                or len(question) > MAX_CHARS["question"]
+                or any(len(c) > MAX_CHARS["choice"] for c in choices)
+            ):
+                error = (
+                    f"입력이 너무 깁니다. 문맥 {MAX_CHARS['context']}자, "
+                    f"질문 {MAX_CHARS['question']}자, 선택지 {MAX_CHARS['choice']}자 이내로 줄여 주세요."
+                )
+                return render(request, "algorithm/kobbqsteer.html", {"error": error})
+            request.session["context"] = context
+            request.session["question"] = question
             request.session["choices"] = [c for c in choices if c]
             request.session["answer"] = request.POST.get("answer") or None
             request.session["biased_answer"] = request.POST.get("biased_answer") or None
@@ -367,7 +700,8 @@ def processing_text_algorithms(request, algorithm_name: str):
             request.session["stereotype"] = request.POST.get("stereotype")
             request.session["template_id"] = request.POST.get("template_id")
             return render(request, "text_mitigation_loading.html")
-        
+
+
 @csrf_exempt
 def show_text_algorithm_result(request, algorithm_name: str):
     html_path = f"algorithm/{algorithm_name}.html"
@@ -380,27 +714,46 @@ def show_text_algorithm_result(request, algorithm_name: str):
         )
 
     if algorithm_name == "cpt":
-        result = postprocessing.casual_path_tracing.cpt.mitigate_cpt()
+        language, error = None, None
+        indices = request.session.get("cpt_sample_indices") or list(DEFAULT_CPT_SAMPLES)
+        try:
+            with _CPT_LOCK:
+                language = mitigate_cpt(indices)
+        except ValueError as e:
+            error = str(e)
+        except (OSError, RuntimeError):
+            logging.getLogger(__name__).exception("cpt mitigate_cpt failed")
+            error = "언어판 실행에 실패했습니다. 모델·데이터 파일과 서버 로그를 확인해 주세요."
         return render(
             request,
             html_path,
-            {"algorithm_name": algorithm_name, "hitrate": result["HitRate"], "faithfulness": result["Faithfulness"]},
+            {
+                "algorithm_name": algorithm_name,
+                "error": error,
+                "metric_keys": _CPT_KEYS,
+                "language": language,
+                "vision": None,
+                "requested": indices,
+                "skipped": sorted(set(indices) - set(language["samples"]))
+                if language
+                else [],
+            },
         )
 
     if algorithm_name == "ember":
         if_result = postprocessing.ember.run_ifeval.migitage_ember_if()
         qa_result = postprocessing.ember.run_qaeval.migitage_ember_qa()
-   
+
         return render(
             request,
             html_path,
             {
-                "algorithm_name": algorithm_name, 
-                "em_pairs": if_result["em_pairs"], 
+                "algorithm_name": algorithm_name,
+                "em_pairs": if_result["em_pairs"],
                 "surface_acc": if_result["surface_acc"],
                 "absolute_acc": if_result["absolute_acc"],
                 "qa_result_acc": qa_result["acc"],
-                "qa_result_matrix": qa_result["matrix"]
+                "qa_result_matrix": qa_result["matrix"],
             },
         )
 
@@ -477,8 +830,14 @@ def show_text_algorithm_result(request, algorithm_name: str):
         else:
             try:
                 result = compare_sample(**kwargs)
-            except (ValueError, OSError, RuntimeError) as e:
+            except ValueError as e:
                 error = str(e)
+            except (OSError, RuntimeError):
+                # 경로·GPU 상태는 로그에만 남기고 화면에는 일반 문구만 보인다
+                logging.getLogger(__name__).exception(
+                    "kobbqsteer compare_sample failed"
+                )
+                error = "모델 파일을 찾지 못했거나 실행에 실패했습니다. 서버 로그를 확인해 주세요."
         summary, metric_keys = _kobbq_steer_summary()
         summary_rows = (
             [

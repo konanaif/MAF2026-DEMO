@@ -1,0 +1,36 @@
+{% extends "common/base.html" %}
+{% load static %}
+
+{% block header_content %}
+	<ul>
+		<li><a href="/app">Home</a></li>
+		<li><a href="/app/datatype">Data</a></li>
+		<li><a href="#">Metrics</a></li>
+		<li><a href="#" class="active">Algorithms</a></li>
+		<li><a href="#">Result</a></li>
+	</ul>
+{% endblock %}
+
+{% block body_content %}
+<h2 class="major">Causal Path Tracing Demo</h2>
+	Causal Path Tracing traces the internal path a language model (pythia-14m) uses to answer a factual statement from the known_1000 dataset, keeps only that path and checks whether the answer survives.
+	<br><br>
+	<ul class="alt">
+		<li><b>모델</b>: EleutherAI/pythia-14m</li>
+		<li><b>데이터</b>: known_1000 (1,209 statements, index 0~1208)</li>
+		<li><b>참고</b>: 모델이 원래 답을 틀리는 샘플은 추적에서 제외되어 결과 표에 나타나지 않습니다. 소요 시간은 GPU 에 따라 다릅니다.</li>
+	</ul>
+
+<h3 class="major">Enter Input</h3>
+	<section>
+		<ul class="alt">
+			<form id="cptInputForm" action="{{ result_url }}" method="post" enctype="multipart/form-data">
+			{% csrf_token %}
+				<b>샘플 인덱스 (sample_indices; 쉼표로 구분, 최대 5개)</b> (ex. 16, 204)
+				<label for="sample_indices"><input type="text" id="sample_indices" name="sample_indices" value="16, 204"></label>
+				<br>
+				<input type="submit" value="Trace" class="primary" />
+			</form>
+		</ul>
+	</section>
+{% endblock %}

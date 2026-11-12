@@ -117,7 +117,7 @@ function submitForm(){
 	const selectedData = document.querySelector('input[name="algorithm"]:checked');
 	if (selectedData){
 		let redirect_url;
-		if (selectedData.value == "concse" || selectedData.value == "cpt" || selectedData.value == "ember"){
+		if (selectedData.value == "concse" || selectedData.value == "ember"){
 			redirect_url = '/app/text/mitigation/'+selectedData.value+'/loading/';
 		}
 		else{

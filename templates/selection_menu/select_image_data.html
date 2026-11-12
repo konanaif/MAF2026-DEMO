@@ -66,6 +66,19 @@
 						<br><br>
 						</div>
 					</li>
+					<li>
+						<div class="col-4 col-12-small">
+							<input type="radio" id="imagenet" name="data_name" value="imagenet">
+							<label for="imagenet">ImageNet (ILSVRC2012 validation)</label>
+						</div>
+						<div class="description">
+									<span class="definition">1,000-class image classification (50,000 validation images). Used by Causal Path Tracing to trace which internal path of a Vision Transformer produces its prediction.</span>
+										<br><br>
+									<span>No protected attribute: fairness metrics and t-SNE are not available for this dataset.</span>
+								<span><a href="https://www.image-net.org/challenges/LSVRC/2012/" target="_blank">Learn more</a></span>
+						<br><br>
+						</div>
+					</li>
 				</ul>
 			<h2>Option</h2>
 				<div class="col-12">
@@ -82,6 +95,7 @@
 		const selectedData = document.querySelector('input[name="data_name"]:checked');
 		if (!selectedData){ alert("Please select an option before submitting."); return false; }
 		if (selectedData.value === "four_findings"){ alert("t-SNE is not available for Chest X-ray. Please select a mitigation algorithm."); return false; }
+		if (selectedData.value === "imagenet"){ alert("t-SNE is not available for ImageNet. Please select a mitigation algorithm."); return false; }
 		document.getElementById('metricForm').action = '/app/metric/image/'+selectedData.value+'/';
 		document.getElementById('metricForm').submit();
 		return false;
