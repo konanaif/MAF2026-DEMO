@@ -25,6 +25,7 @@ from MAF.benchmark.crehate.crehate_demo import check_hatespeech
 from MAF.benchmark.kobbq.kobbq_demo import check_korean_bias, KoBBQArguments
 from MAF.benchmark.bbg.bbg_demo import BBGArguments, run_bbg_pipeline
 from MAF.algorithms.inprocessing.kobbq_steer.demo import MAX_CHARS, compare_sample
+from MAF.algorithms.inprocessing.deemc.demo import Lambda0Missing, compare_lambda
 from MAF.algorithms.postprocessing.casual_path_tracing.CausalPathTracing import (
     DEFAULT_CPT_SAMPLES,
     MAX_CPT_SAMPLES,
@@ -330,7 +331,7 @@ def select_action_per_datatype(request, data_type):
 
 @csrf_exempt
 def load_metric(request, data_type, data_name):
-    if data_name == "credit_union":
+    if data_name in ("credit_union", "movielens"):
         return redirect(f"/app/algorithm/tabular/{data_name}/")
     if data_name in ("four_findings", "imagenet"):
         return redirect(f"/app/algorithm/image/{data_name}/")
@@ -345,7 +346,7 @@ def load_metric(request, data_type, data_name):
 def get_data_metric(request, data_type, data_name):
     if data_name in ("four_findings", "imagenet"):
         return redirect(f"/app/algorithm/image/{data_name}/")
-    if data_name == "credit_union":
+    if data_name in ("credit_union", "movielens"):
         return redirect(f"/app/algorithm/tabular/{data_name}/")
     if data_type == "tabular":
         return render(request, "metrics.html", get_tabular_data_metric(data_name))
@@ -392,6 +393,106 @@ def load_mitigation(request, data_name, algorithm_name):
     return render(
         request, "mitigation_loading.html", {"algorithm_name": algorithm_name}
     )
+
+
+_DEEMC_ARMS = ("glocal_lambda0", "dee_mc")  # 화면에는 λ_dee 0 vs 0.5 두 열만(U4)
+_DEEMC_LABELS = ("Original (λ_dee = 0)", "Mitigated (λ_dee = 0.5)")
+# compare_metric.html 과 같은 행 구성. rule: high(높을수록), low(낮을수록), abs0(0에 가까울수록), near(목표값에 가까울수록)
+_DEEMC_TABLES = (
+    ("A. Recommendation metrics", (
+        ("Test RMSE", "test_rmse", "low", None, None),
+        ("DEE", "dee", "low", "0.0", None),
+    )),
+    ("B. Performance metrics", (
+        ("Recall", "recall", "high", None, ("pm", "Recall")),
+        ("True negative rate", "true_negative_rate", "high", None, ("pm", "TNR")),
+        ("False positive rate", "false_positive_rate", "low", None, ("pm", "FPR")),
+        ("False negative rate", "false_negative_rate", "low", None, ("pm", "FNR")),
+        ("Precision", "precision", "high", None, ("pm", "precision")),
+        ("Negative predictive value", "negative_predictive_value", "high", None, ("pm", "NPV")),
+        ("False discovery rate", "false_discovery_rate", "low", None, ("pm", "FDR")),
+        ("False omission rate", "false_omission_rate", "low", None, ("pm", "FOR")),
+        ("Accuracy", "accuracy", "high", None, ("pm", "ACC")),
+    )),
+    ("C. Classification metrics", (
+        ("Error rate", "error_rate", "low", "0", ("bm", "Error Rate")),
+        ("Average odds difference", "average_odds_difference", "abs0", "0.0", ("bm", "Average odds difference")),
+        ("Average abs odds difference", "average_abs_odds_difference", "low", "0.0", ("bm", "Average abs odds difference")),
+        ("Selection rate", "selection_rate", ("near", 0.5), "0.5", ("bm", "Selection rate")),
+        ("Disparate impact", "disparate_impact", ("near", 1.0), "1.0", ("bm", "Disparate impact")),
+        ("Statistical parity difference", "statistical_parity_difference", "abs0", "0.0", ("bm", "Statistical parity difference")),
+        ("Generalized entropy index", "generalized_entropy_index", "low", "0.0", ("bm", "Generalized entropy index")),
+        ("Theil index", "theil_index", "low", "0.0", ("bm", "Theil index")),
+        ("Equal opportunity difference", "equal_opportunity_difference", "abs0", "0.0", ("bm", "Equal opportunity difference")),
+    )),
+)  # fmt: skip
+_DEEMC_CHART_PERF = ("true_negative_rate", "false_positive_rate", "false_negative_rate", "recall",
+                     "precision", "negative_predictive_value", "false_discovery_rate",
+                     "false_omission_rate", "accuracy")  # fmt: skip
+_DEEMC_CHART_BIAS = ("average_odds_difference", "selection_rate", "disparate_impact",
+                     "statistical_parity_difference", "theil_index", "equal_opportunity_difference")  # fmt: skip
+
+
+def _deemc_values(arm):
+    """compare_metric.html 이 쓰는 키로 평탄화(recall=TPR, NPV=1−FOR). None 은 그대로."""
+    maf = arm["maf"]
+    values = {"test_rmse": arm["test_rmse"], "dee": arm["dee"], **maf}
+    values["recall"] = maf["true_positive_rate"]
+    fo = maf["false_omission_rate"]
+    values["negative_predictive_value"] = None if fo is None else 1.0 - fo
+    return {k: (None if v is None else round(float(v), 4)) for k, v in values.items()}
+
+
+def _deemc_score(rule, value):
+    """작을수록 좋은 점수로 변환."""
+    if isinstance(rule, tuple):
+        return abs(value - rule[1])
+    if rule == "high":
+        return -value
+    if rule == "abs0":
+        return abs(value)
+    return value
+
+
+def _deemc_bold(rule, orig, miti):
+    if orig is None or miti is None:
+        return (False, False)
+    a, b = _deemc_score(rule, orig), _deemc_score(rule, miti)
+    return (a <= b, b <= a)
+
+
+def _deemc_context(result):
+    orig, miti = (_deemc_values(result["arms"][a]) for a in _DEEMC_ARMS)
+    tables = []
+    for title, specs in _DEEMC_TABLES:
+        rows = []
+        for label, key, rule, ideal, tip in specs:
+            bold = _deemc_bold(rule, orig[key], miti[key])
+            rows.append(
+                {
+                    "label": label,
+                    "orig": orig[key],
+                    "miti": miti[key],
+                    "orig_bold": bold[0],
+                    "miti_bold": bold[1],
+                    "ideal": ideal,
+                    "tip": tip,
+                }
+            )
+        tables.append(
+            {"title": title, "rows": rows, "has_ideal": title.startswith("C.")}
+        )
+    chart = {
+        "performance": {
+            "original": [orig[k] for k in _DEEMC_CHART_PERF],
+            "mitigated": [miti[k] for k in _DEEMC_CHART_PERF],
+        },
+        "bias": {
+            "original": [orig[k] for k in _DEEMC_CHART_BIAS],
+            "mitigated": [miti[k] for k in _DEEMC_CHART_BIAS],
+        },
+    }
+    return {"tables": tables, "chart_json": json.dumps(chart)}  # None → null
 
 
 @csrf_exempt
@@ -450,6 +551,34 @@ def get_mitigation_result(request, data_name: str, algorithm_name: str):
                 "error": error,
             },
         )
+
+    if algorithm_name == "deemc":
+        # λ_dee=0 vs 0.5 두 arm 만 표시(U4). 요청마다 라이브 평가, 겹치면 demo 모듈 락으로 직렬화
+        result, error = None, None
+        try:
+            result = compare_lambda(device="auto")
+        except Lambda0Missing as e:  # 상대경로만 담긴 안내문 → 그대로 표시
+            error = str(e)
+        except (
+            Exception
+        ):  # 그 외(절대경로·torch 내부 문구 포함)는 로그에만, 화면은 일반 문구
+            logging.getLogger(__name__).exception("deemc compare_lambda failed")
+            error = (
+                "DEE-MC 평가에 실패했습니다. 체크포인트(model/deemc, model/deemc/lambda0)·"
+                "데이터(data/deemc)와 서버 로그를 확인해 주세요."
+            )
+        context = {
+            "algorithm_name": "DEE-MC",
+            "data_name": "MovieLens-1M",
+            "protected_attribute": "sex",
+            "labels": _DEEMC_LABELS,
+            "error": error,
+            "tables": [],
+            "chart_json": None,
+        }
+        if result:
+            context.update(_deemc_context(result))
+        return render(request, "algorithm/deemc.html", context)
 
     if algorithm_name == "intapt":
         result = load_audio_algorithm(algorithm_name)
