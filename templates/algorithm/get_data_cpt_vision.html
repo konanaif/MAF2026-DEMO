@@ -1,0 +1,36 @@
+{% extends "common/base.html" %}
+{% load static %}
+
+{% block header_content %}
+	<ul>
+		<li><a href="/app">Home</a></li>
+		<li><a href="/app/datatype">Data</a></li>
+		<li><a href="#">Metrics</a></li>
+		<li><a href="#" class="active">Algorithms</a></li>
+		<li><a href="#">Result</a></li>
+	</ul>
+{% endblock %}
+
+{% block body_content %}
+<h2 class="major">Causal Path Tracing (Vision) Demo</h2>
+	Causal Path Tracing traces the internal path a Vision Transformer (vit_tiny_patch16_224) uses to classify an ImageNet image, keeps only that path and checks whether the prediction survives.
+	<br><br>
+	<ul class="alt">
+		<li><b>모델</b>: timm vit_tiny_patch16_224 (ImageNet-1k)</li>
+		<li><b>데이터</b>: ImageNet val (50,000 images, index 0~49999)</li>
+	</ul>
+
+<h3 class="major">Enter Input</h3>
+	<section>
+		{% if error %}<p><b>실행할 수 없습니다.</b> {{ error }}</p>{% endif %}
+		<ul class="alt">
+			<form id="cptVisionInputForm" action="{{ result_url }}" method="post" enctype="multipart/form-data">
+			{% csrf_token %}
+				<b>ImageNet val 인덱스 (sample_idx; 0~49999, 1개)</b> (ex. {{ default_idx }})
+				<label for="sample_idx"><input type="text" id="sample_idx" name="sample_idx" value="{{ default_idx }}"></label>
+				<br>
+				<input type="submit" value="Trace" class="primary" />
+			</form>
+		</ul>
+	</section>
+{% endblock %}

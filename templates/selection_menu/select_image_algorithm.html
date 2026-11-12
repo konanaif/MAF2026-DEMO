@@ -12,7 +12,21 @@
 </section>
 <section>
 	<form id="algorithmForm" method="post" enctype="multipart/form-data">
-		{% if data_name == "four_findings" %}
+		{% if data_name == "imagenet" %}
+		<h2>Postprocessing</h2>
+			<ul class="alt">
+				<li>
+					<div class="col-4 col-12-small">
+							<input type="radio" id="{{CasualPathTracing}}" name="algorithm" value="{{CasualPathTracing}}" checked>
+							<label class="tooltip" for="{{CasualPathTracing}}">
+								Causal Path Tracing (Vision)
+								<span class="tooltiptext tooltip-right">
+									Causal Path Tracing traces the internal path a Vision Transformer (vit_tiny_patch16_224) uses to classify an ImageNet image, keeps only that path and checks whether the decision survives. The latest saved result is shown; a new index is traced in the background.
+								</span></label>
+					</div>
+				</li>
+			</ul>
+		{% elif data_name == "four_findings" %}
 		<h2>Preprocessing</h2>
 			<ul class="alt">
 				<li>

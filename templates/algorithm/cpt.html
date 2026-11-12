@@ -13,52 +13,139 @@
 {% endblock %}
 
 {% block body_content %}
+{% if status == "running" %}<meta http-equiv="refresh" content="60">{% endif %}
 <b>Causal Path Tracing</b> is an algorithm for causally tracing the internal pathways of a Transformer-based model's answer generation.
-The algorithm explores the causal path for each sample's model decision within a pretrained Transformer. 
-It is evaluated based on how well the original decision is preserved when only the identified Causal Path remains.
+The algorithm explores the causal path for each sample's model decision within a pretrained Transformer, then keeps only the nodes on that path (intervening on every other node) and checks whether the model still makes the same decision.
 
 <br>
-- Hit Rate: The proportion of samples for which the original decision index is maintained when only the Causal Path is preserved.
-For instance, if among 100 explored samples, the original decision is maintained for only 70 samples when only the Causal Path is preserved, then Hit Rate = 0.7.
-
-- Faithfulness: The degree to which the logit value of the original decision index is preserved when only the Causal Path is preserved.
-For instance, if among 100 explored samples, the logit of the original decision index is maintained by only about 60% when only the Causal Path is preserved, then Faithfulness = 0.6.
+- <b>path_node_ratio(선택된 경로 비율)</b>: the share of path nodes (attention and MLP blocks, summed over layers) that the traced causal path keeps. Lower means a sparser explanation: 0.76 means 76% of the nodes were needed to explain the decision.
+<br>
+- <b>decision_kept_ratio(경로만 남겼을 때 원래 예측 유지율)</b>: the share of samples whose original decision is preserved when only the causal path is kept (the Hit Rate of the original paper). 1.0 means every sample kept its decision.
 <br><br>
-<b> * Interpretation Guidelines</b>
-<br>
-<table>
-    <thead>
-        <tr>
-            <th>Evaluation Result</th>
-            <th>Interpretation</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td>High Hit Rate &amp; High Faithfulness</td>
-            <td>The explored Causal Path is truly causal for that decision.</td>
-        </tr>
-        <tr>
-            <td>High Hit Rate &amp; Low Faithfulness</td>
-            <td>The explored Causal Path is causal enough to produce the decision, but there is some information loss.</td>
-        </tr>
-        <tr>
-            <td>Low Hit Rate &amp; High Faithfulness</td>
-            <td>Although the explored Causal Path maintains the original logit, it is difficult to consider it causal because the model's decision has changed.</td>
-        </tr>
-        <tr>
-            <td>Low Hit Rate &amp; Low Faithfulness</td>
-            <td>The explored Causal Path is not causal.</td>
-        </tr>
-    </tbody>
-</table>
 
-<h1 class="major">Results</h1>
+{% if data_name == "imagenet" and vision_index != None %}
 	<section>
 		<ul class="alt">
-			<li><b>Dataset</b>: LAMA T-REx dataset</li>
-			<li><b>Hit Rate</b>: {{ hitrate }}</li>
-			<li><b>Faithfulness</b>: {{ faithfulness }}</li>
+			<li><b>입력한 샘플 인덱스</b>: ImageNet val #{{ vision_index }}</li>
 		</ul>
 	</section>
+{% endif %}
+{% if requested %}
+	<section>
+		<ul class="alt">
+			<li><b>입력한 샘플 인덱스</b>: known_1000 #{{ requested|join:", #" }}</li>
+			{% if skipped %}<li><b>제외된 샘플</b>: #{{ skipped|join:", #" }} (모델이 원래 답을 틀려 추적에서 제외됨)</li>{% endif %}
+		</ul>
+	</section>
+{% endif %}
+
+<h1 class="major">Results</h1>
+{% if error %}
+	<section>
+		<p><b>실행할 수 없습니다.</b> {{ error }}</p>
+		{% if data_name != "imagenet" %}<p><a href="/app/text/mitigation/cpt/getdata/" class="button">다시 입력</a></p>{% endif %}
+	</section>
+{% endif %}
+	<table>
+		<thead>
+			<tr>
+				<th>Model</th>
+				<th>Samples</th>
+				{% for k in metric_keys %}<th>{{ k }}</th>{% endfor %}
+			</tr>
+		</thead>
+		<tbody>
+			{% if language %}
+			<tr>
+				<td><b>Language</b>: pythia-14m</td>
+				<td>known_1000 #{{ language.samples|join:", #" }} ({{ language.num_samples }} traced)</td>
+				<td>{{ language.path_node_ratio|floatformat:4 }}</td>
+				<td>{{ language.decision_kept_ratio|floatformat:4 }}</td>
+			</tr>
+			{% endif %}
+			{% if prediction %}
+			<tr>
+				<td><b>Vision</b>: vit_tiny_patch16_224</td>
+				<td>ImageNet val #{{ vision_index }}{% if vision %} (saved {{ vision.run }}){% endif %}</td>
+				{% if vision %}
+				<td>{{ vision.path_node_ratio|floatformat:4 }}</td>
+				<td>{% if vision.decision_kept %}1.0000{% else %}0.0000{% endif %}</td>
+				{% else %}
+				<td>-</td>
+				<td>-</td>
+				{% endif %}
+			</tr>
+			{% endif %}
+		</tbody>
+	</table>
+	{% if language.details %}
+	<h3 class="major">Samples</h3>
+	<table>
+		<thead>
+			<tr>
+				<th>#</th>
+				<th>문장 (prompt)</th>
+				<th>정답</th>
+				<th>모델 답</th>
+				<th>판정</th>
+				<th>경로만 남긴 답</th>
+				<th>path_node_ratio</th>
+				<th>decision kept</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% for d in language.details %}
+			<tr>
+				<td>{{ d.index }}</td>
+				<td>{{ d.prompt }}</td>
+				<td>{{ d.answer }}</td>
+				<td>{{ d.prediction }}</td>
+				<td>{% if d.correct %}정답{% else %}오답{% endif %}</td>
+				{% if d.traced %}
+				<td>{{ d.path_prediction }}</td>
+				<td>{{ d.path_node_ratio|floatformat:4 }}</td>
+				<td>{% if d.decision_kept %}✓{% else %}✗{% endif %}</td>
+				{% else %}
+				<td colspan="3">제외 — 모델이 답을 틀려 인과 경로를 추적하지 않음</td>
+				{% endif %}
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+	{% endif %}
+	{% if prediction %}
+	<h3 class="major">Sample</h3>
+	<table>
+		<thead>
+			<tr>
+				<th>#</th>
+				<th>정답 (label)</th>
+				<th>모델 답 (top-1)</th>
+				<th>판정</th>
+				<th>경로만 남긴 답</th>
+				<th>path_node_ratio</th>
+				<th>decision kept</th>
+			</tr>
+		</thead>
+		<tbody>
+			<tr>
+				<td>{{ prediction.index }}</td>
+				<td>{{ prediction.label_name }} ({{ prediction.label_wnid }}, class {{ prediction.label }})</td>
+				<td>{{ prediction.prediction_name }} ({{ prediction.prediction_wnid }}, class {{ prediction.prediction }})</td>
+				<td>{% if prediction.correct %}정답{% else %}오답{% endif %}</td>
+				{% if vision %}
+				<td>class {{ vision.path_prediction }}</td>
+				<td>{{ vision.path_node_ratio|floatformat:4 }}</td>
+				<td>{% if vision.decision_kept %}✓{% else %}✗{% endif %}</td>
+				{% elif status == "excluded" %}
+				<td colspan="3">제외 — 모델이 원래 답을 틀려 인과 경로를 추적하지 않음</td>
+				{% elif status == "failed" %}
+				<td colspan="3">추적에 실패했습니다: {{ job.error }} (시작 {{ job.started }}). 다른 인덱스를 시도해 주세요.</td>
+				{% else %}
+				<td colspan="3">추적 중: 시작 {{ job.started }}, 경과 {{ elapsed_min }}분. 이 페이지는 60초마다 자동 새로고침됩니다.</td>
+				{% endif %}
+			</tr>
+		</tbody>
+	</table>
+	{% endif %}
 {% endblock %}
