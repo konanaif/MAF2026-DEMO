@@ -20,6 +20,7 @@ ALGORITHM_NAME2ID = {
     "sIPMLFR": "sipmlfr",
     "ALINCredit": "alincredit",
     "DRAF": "draf",
+    "DEEMC": "deemc",
     # postprocessing
     "CalibratedEqOdds": "ceo",
     "EqualizedOdds": "eo",

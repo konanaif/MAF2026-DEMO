@@ -1,0 +1,206 @@
+{% extends "common/base.html" %}
+{% load static %}
+
+{% block header_content %}
+	<ul>
+		<li><a href="/app">Home</a></li>
+		<li><a href="/app/datatype">Data</a></li>
+		<li><a href="#">Metrics</a></li>
+		<li><a href="/app/algorithm/tabular/movielens/">Algorithms</a></li>
+		<li><a href="#" class="active">Result</a></li>
+	</ul>
+{% endblock %}
+
+{% block body_content %}
+DEE-MC applies DEE fairness regularization to a GLocal-K matrix-completion recommender. The supplied model combines two GLocal-K checkpoints with stochastic weight averaging (SWA) and a matrix-factorization (MF) predictor.
+<br>
+- <b>Test RMSE</b>: Predicted versus observed 1–5 ratings on the 100,020 test entries
+<br>
+- <b>DEE</b>: Sum of four absolute gaps between the overall positive prediction rate and the rates for sex × genre-group combinations, over the original sensitive-item × all-user population. Positive means predicted rating ≥ 3
+<br>
+- <b>Performance metrics, Classification metrics</b>: the 18 MAF group-fairness metrics computed on the held-out ratings that users actually gave, with predicted rating ≥ 3.0 as the positive label and sex as the protected attribute (privileged: Male, unprivileged: Female)
+<br><br>
+
+<h1 class="major">Compare models</h1>
+{% if error %}
+	<section>
+		<p><b>실행할 수 없습니다.</b> {{ error }}</p>
+		<p><a href="/app/algorithm/tabular/movielens/" class="button">다시 선택</a></p>
+	</section>
+{% endif %}
+{% if tables %}
+<section>
+	<ul class="alt">
+		<li><b>Dataset</b>: {{ data_name }}</li>
+		<li><b>Protected attribute</b>: {{ protected_attribute }}</li>
+		<li><b>Mitigation algorithm</b>: {{ algorithm_name }} — Original is the same model trained with the DEE regularizer off (λ_dee = 0), Mitigated with it on (λ_dee = 0.5)</li>
+	</ul>
+</section>
+
+<h2>Tables of metrics</h2>
+	{% for table in tables %}
+	<section>
+		<h3>{{ table.title }}</h3>
+		<div class="table-wrapper">
+			<table>
+				<thead>
+					<tr>
+						<th>Attribute</th>
+						<th>{{ labels.0 }}</th>
+						<th>{{ labels.1 }}</th>
+						{% if table.has_ideal %}<th>Fairness value</th>{% endif %}
+					</tr>
+				</thead>
+				<tbody>
+					{% for row in table.rows %}
+					<tr>
+						{% if row.tip %}<td class="tooltip" onmouseover="showTooltip('{{ row.tip.0 }}', '{{ row.tip.1 }}')">{{ row.label }}</td>{% else %}<td>{{ row.label }}</td>{% endif %}
+						<td>{% if row.orig == None %}-{% elif row.orig_bold %}<b>{{ row.orig|floatformat:4 }}</b>{% else %}{{ row.orig|floatformat:4 }}{% endif %}</td>
+						<td>{% if row.miti == None %}-{% elif row.miti_bold %}<b>{{ row.miti|floatformat:4 }}</b>{% else %}{{ row.miti|floatformat:4 }}{% endif %}</td>
+						{% if table.has_ideal %}<td>{{ row.ideal }}</td>{% endif %}
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	</section>
+	{% endfor %}
+	<div id="chartmodal" class="modal">
+		<div class="modal-content">
+		<span id="closenewModal" class="close">×</span>
+		<h2 id="chartmodalTitle"></h2>
+		<p id="chartmodalContent"></p>
+		</div>
+	</div>
+	<br><br>
+{% endif %}
+{% endblock %}
+
+{% block chart_content %}
+{% if chart_json %}
+<!-- Chart -->
+	<h2>Charts of metrics</h2>
+	<section>
+		<h3>Performance measures</h3>
+		<figure class="highcharts-figure">
+			<div id="performance_bar" class="bar"></div>
+			<div id="performance_bar3d" class="bar3d"></div>
+			<div id="performance_spider" class="spider"></div>
+		</figure>
+	</section>
+	<br><br>
+	<section>
+		<h3>Bias measures</h3>
+		<figure class="highcharts-figure">
+			<div class="chart-container" style="display: flex;"></div>
+			<div class="gap1" style="height: 60px; background-color: #ffffff;"></div>
+			<div class="bar3d_chart_container" style="display: flex;"></div>
+			<div class="gap1" style="height: 60px; background-color: #ffffff;"></div>
+			<div class="test2" style="display: flex;"></div>
+			<div id="bias_spider" class="spider"></div>
+		</figure>
+	</section>
+	<br><br>
+</div>
+
+<script src="{% static 'src/bias_chart.js' %}"></script>
+<script src="https://code.highcharts.com/highcharts.js"></script>
+<script src="https://code.highcharts.com/highcharts-3d.js"></script>
+<script src="https://code.highcharts.com/highcharts-more.js"></script>
+<script type="text/javascript" src="https://code.highcharts.com/modules/exporting.js"></script>
+
+<!-- Resource Script -->
+<script>
+		// Original = λ_dee 0, Mitigated = λ_dee 0.5 (series names come from bias_chart.js)
+		const chartData = {{ chart_json|safe }};
+		const performanceMeasure = chartData.performance;
+		const performance_xAxis = ["TNR", "FPR", "FNR", "Recall", "Precision", "NPV", "FDR", "FOR", "ACC"];
+		const biasMeasure = chartData.bias;
+		const biasMeasure_xAxis = ["Average odds difference", "Selection rate", "Disparate impact", "Statistical parity difference", "Theil index", "Equal opportunity difference"];
+
+		const pm_descriptions = {
+			'TNR': "TNR(True Negative Rate), also known as specificity, measures the proportion of true negative predictions out of all actual negative instances, indicating how well a model correctly identifies negative cases.<br><br>TP/P",
+			'FPR': "FPR(False Positive Rate) quantifies the rate of false positive predictions, representing the proportion of actual negative instances that are incorrectly classified as positive by a model.<br><br>FP/N",
+			'FNR': "FNR(False Negative Rate) measures the rate at which false negatives occur, indicating the proportion of actual positive instances that a model fails to correctly classify as positive.<br><br>FN/P",
+			'Recall': "Recall, also known as sensitivity, represents the ability of a model to correctly identify true positive instances out of all actual positive instances, thus quantifying how well the model captures positive cases.<br><br>TP/TP+FN",
+			'Precision': "Precision calculates the accuracy of positive predictions made by a model, showing the proportion of true positive instances out of all instances predicted as positive.<br><br>TP/TP+FP",
+			'NPV': "NPV(Negative Predictive Value) is a measure of the proportion of true negatives among all negative predictions made by a model, indicating how well a model correctly identifies negative cases.<br><br>TN/TN+FN",
+			'FDR': "FDR(False discovery rate) measures the proportion of false positive predictions among all positive predictions made by a model.<br><br>FP/FP+TP",
+			'FOR': "FOR(False Omission Rate) measures the proportion of false negative predictions among all negative predictions made by a model.<br><br>FN/FN+TN",
+			'ACC': "Accuracy is a general metric that assesses the overall correctness of predictions, measuring the proportion of correct predictions out of all instances.<br><br>TP+TN/P+N"
+		};
+
+		const bm_descriptions = {
+			'Error Rate': "Error Rate quantifies the overall accuracy of predictions made by a model by measuring the proportion of incorrect predictions out of all predictions. <br><br>The ideal value for this metric is 0. Lower scores indicate fairness, while higher scores are considered problematic.",
+			'Average odds difference': "Average Odds Difference is computed as the average difference between FPR (False Positives / Negatives) and TPR (True Positives / Positives) for unprivileged and privileged groups.<br><br>The ideal value for this metric is 0. A value < 0 implies higher benefit for the privileged group, while a value > 0 implies higher benefit for the unprivileged group.<br><br>Fairness for this metric is between -0.1 and 0.1.",
+			'Average abs odds difference': "Average Absolute Odds Difference is computed as the average of the absolute difference in FPR (False Positives / Negatives) and TPR (True Positives / Positives) for unprivileged and privileged groups.<br><br>The ideal value for this metric is 0. A value < 0 implies higher benefit for the privileged group, while a value > 0 implies higher benefit for the unprivileged group.",
+			'Selection rate': "Selection Rate is a metric that measures the proportion of instances (TP + FP) predicted as positive among all predictions (P + N). It is used to assess the bias of the model, particularly in terms of how it selects positive outcomes. <br><br>The ideal value may vary depending on the specific characteristics of the data and the context. However, a value close to 0.5 is generally considered ideal, indicating a balanced selection rate.",
+			'Disparate impact': "Disparate Impact is computed as the ratio of the rate of favorable outcomes for the unprivileged group to that of the privileged group.<br><br>The ideal value for this metric is 1.0. A value < 1 implies higher benefit for the privileged group, while a value > 1 implies a higher benefit for the unprivileged group.<br><br>Fairness for this metric is between 0.8 and 1.25.",
+			'Statistical parity difference': "Statistical Parity Difference is computed as the difference in the rate of favorable outcomes received by the unprivileged group compared to the privileged group.<br><br>The ideal value for this metric is 0. Fairness for this metric is between -0.1 and 0.1.",
+			'Generalized entropy index': "Generalized Entropy Index is proposed as a unified individual and group fairness measure.<br><br>The ideal value for this metric is 0, signifying perfect fairness. However, the metric has no upper limit and can have a minimum value that is negative.",
+			'Theil index': "Theil Index is computed as the generalized entropy of benefit for all individuals in the dataset, with alpha = 1. It measures the inequality in benefit allocation for individuals.<br><br>A value of 0 implies perfect fairness. Fairness is indicated by lower scores, while higher scores are considered problematic.",
+			'Equal opportunity difference': "Equal Opportunity Difference is computed as the difference in true positive rates between the unprivileged and privileged groups. The true positive rate is the ratio of true positives to the total number of actual positives for a given group. <br><br>The ideal value is 0. A value < 0 implies higher benefit for the privileged group, while a value > 0 implies higher benefit for the unprivileged group.<br><br>Fairness for this metric is between -0.1 and 0.1."
+		};
+
+		const performanceBar = new BarChart("performance_bar");
+		performanceBar.setAxis(performance_xAxis);
+		const modalperformanceBar = BarChartWithModal(performanceBar, 'performance_bar', performanceMeasure, pm_descriptions, performance_xAxis, '2d');
+		modalperformanceBar.show();
+
+		const performanceBar3d = new BarChart3D("performance_bar3d");
+		performanceBar3d.setAxis(performance_xAxis);
+		const modalperformanceBar3d = BarChartWithModal(performanceBar3d, 'performance_bar3d', performanceMeasure, pm_descriptions, performance_xAxis, '3d');
+		modalperformanceBar3d.show();
+
+		const performanceSpider = new SpiderWebChart("performance_spider");
+		performanceSpider.setAxis(performance_xAxis);
+		performanceSpider.push(performanceMeasure.original, {color: "#FF0000bb", name: "Original"});
+		performanceSpider.push(performanceMeasure.mitigated, {name: "Mitigated"});
+		performanceSpider.show();
+
+		const chartContainer = document.querySelector(".chart-container");
+		chartContainer.style.display = "flex";
+		chartContainer.style.backgroundColor = "#ffffff";
+
+		for (let i = 0; i < biasMeasure_xAxis.length; i++) {
+			const newChartContainer = document.createElement("div");
+			newChartContainer.id = `new_chart_container_${i}`;
+			newChartContainer.classList.add("chart-item", "bar");
+			newChartContainer.style.flex = "1";
+			chartContainer.appendChild(newChartContainer);
+
+			const chartDataMerge = {original: [biasMeasure.original[i]], mitigated: [biasMeasure.mitigated[i]]};
+			const chartXAxisItem = [biasMeasure_xAxis[i]];
+			const chartItem = new BarChart(`new_chart_container_${i}`);
+			chartItem.setAxis(chartXAxisItem);
+			const modalbiasBar = clsBarChartWithModal(chartItem, 'newChartContainer.id', chartDataMerge, bm_descriptions, chartXAxisItem, '2d');
+			modalbiasBar.show();
+		}
+
+		const chart3dContainer = document.querySelector(".bar3d_chart_container");
+		chart3dContainer.style.display = "flex";
+		chart3dContainer.style.backgroundColor = "#ffffff";
+
+		for (let i = 0; i < biasMeasure_xAxis.length; i++) {
+			const new3dChartContainer = document.createElement("div");
+			new3dChartContainer.id = `new_chart_container_3d_${i}`;
+			new3dChartContainer.classList.add("chart-item", "bar");
+			new3dChartContainer.style.flex = "1";
+			chart3dContainer.appendChild(new3dChartContainer);
+
+			const chart3dDataMerge = {original: [biasMeasure.original[i]], mitigated: [biasMeasure.mitigated[i]]};
+			const chart3dXAxisItem = [biasMeasure_xAxis[i]];
+			const chart3dItem = new BarChart(`new_chart_container_3d_${i}`);
+			chart3dItem.setAxis(chart3dXAxisItem);
+			const modalbiasBar3d = clsBarChartWithModal(chart3dItem, `new_chart_container_3d_${i}`, chart3dDataMerge, bm_descriptions, chart3dXAxisItem, '3d');
+			modalbiasBar3d.show();
+		}
+
+		const biasSpider = new SpiderWebChart("bias_spider");
+		biasSpider.setAxis(biasMeasure_xAxis);
+		biasSpider.push(biasMeasure.original, {color: "#FF0000bb", name: "Original"});
+		biasSpider.push(biasMeasure.mitigated, {name: "Mitigated"});
+		biasSpider.show();
+</script>
+{% endif %}
+{% endblock %}

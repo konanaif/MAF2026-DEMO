@@ -25,6 +25,20 @@
 						</div>
 					</li>
 				</ul>
+		{% elif data_name == "movielens" %}
+			<h2>Inprocessing</h2>
+				<ul class="alt">
+					<li>
+						<div class="col-4 col-12-small">
+							<input type="radio" id="{{ DEEMC }}" name="algorithm" value="{{ DEEMC }}" checked>
+							<label class="tooltip" for="{{ DEEMC }}">DEE-MC
+								<span class="tooltiptext tooltip-right">
+									DEE-MC adds an Equal Experience (DEE) regularizer to GLocal-K matrix completion so that male and female users are exposed to male- and female-preferred genres at the same rate. The demo compares the regularizer off (λ_dee = 0) and on (λ_dee = 0.5) with saved checkpoints: test RMSE, DEE, and the 18 MAF group-fairness metrics.
+								</span>
+							</label>
+						</div>
+					</li>
+				</ul>
 		{% else %}
 			<h2>Preprocessing</h2>
 				<ul class="alt">
