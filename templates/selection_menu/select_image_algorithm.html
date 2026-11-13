@@ -40,6 +40,20 @@
 					</div>
 				</li>
 			</ul>
+		{% elif data_name == "utkface" %}
+		<h2>Inprocessing</h2>
+			<ul class="alt">
+				<li>
+					<div class="col-4 col-12-small">
+							<input type="radio" id="{{RG_TTA}}" name="algorithm" value="{{RG_TTA}}" checked>
+							<label class="tooltip" for="{{RG_TTA}}">
+								RG-TTA
+								<span class="tooltiptext tooltip-right">
+									RG-TTA is an algorithm that mitigates demographic bias in CLIP-based image retrieval at test time. It uses query-specific reward-based gating to adjust the adaptation strength, balancing fairness and retrieval performance without requiring additional training.
+								</span></label>
+					</div>
+				</li>
+			</ul>
 		{% else %}
 		<h2>Inprocessing</h2>
 		{% endif %}

@@ -79,6 +79,23 @@
 						<br><br>
 						</div>
 					</li>
+					<li>
+						<div class="col-4 col-12-small">
+							<input type="radio" id="utkface" name="data_name" value="utkface">
+							<label for="utkface">UTKFace</label>
+						</div>
+						<div class="description">
+									<span class="definition" onclick="showDefinition('Protected attribute')">UTKFace dataset is a large-scale face dataset with long age span (range from 0 to 116 years old). The dataset consists of over 20,000 face images with annotations of age, gender, and ethnicity.</span>
+										<br><br>
+									<span class="definition" onclick="showDefinition('Protected attribute')">Protected Attributes:</span>
+									<br>
+										- <b>Gender</b>: <b><i>Male</i></b> / <b><i>Female</i></b><br>
+										- <b>Race</b>: <b><i>White</i></b> / <b><i>Black</i></b> / <b><i>Asian</i></b> / <b><i>Indian</i></b><br>
+								<span>t-SNE is not available for this dataset.</span>
+								<span><a href="https://susanqq.github.io/UTKFace/" target="_blank">Learn more</a></span>
+						<br><br>
+						</div>
+					</li>
 				</ul>
 			<h2>Option</h2>
 				<div class="col-12">
@@ -96,6 +113,7 @@
 		if (!selectedData){ alert("Please select an option before submitting."); return false; }
 		if (selectedData.value === "four_findings"){ alert("t-SNE is not available for Chest X-ray. Please select a mitigation algorithm."); return false; }
 		if (selectedData.value === "imagenet"){ alert("t-SNE is not available for ImageNet. Please select a mitigation algorithm."); return false; }
+		if (selectedData.value === "utkface"){ alert("t-SNE is not available for UTKFace. Please select a mitigation algorithm."); return false; }
 		document.getElementById('metricForm').action = '/app/metric/image/'+selectedData.value+'/';
 		document.getElementById('metricForm').submit();
 		return false;
