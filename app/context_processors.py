@@ -33,6 +33,7 @@ ALGORITHM_NAME2ID = {
     "LearningFromFairness": "lff",
     "DMLBG": "dmlbg",
     "SubgroupBalancedResampling": "sbr",
+    "RG_TTA": "rgtta",
     # audio
     "INTapt": "intapt",
     "FairASR": "fairasr",

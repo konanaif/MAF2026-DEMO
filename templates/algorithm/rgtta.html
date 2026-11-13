@@ -1,0 +1,58 @@
+{% extends "common/base.html" %}
+{% load static %}
+
+{% block header_content %}
+	<ul>
+		<li><a href="/app">Home</a></li>
+		<li><a href="/app/datatype">Data</a></li>
+		<li><a href="#">Metrics</a></li>
+		<li><a href="/app/algorithm/image/{{ data_name }}/">Algorithms</a></li>
+		<li><a href="#" class="active">Result</a></li>
+	</ul>
+{% endblock %}
+
+{% block body_content %}
+<h1 class="major">Compare models</h1>
+
+<section>
+	<ul class="alt">
+		<li><b>Dataset</b>: {{ data_name }}</li>
+		<li><b>Protected attribute</b>: {{ protected_attribute }}</li>
+		<li><b>Mitigation algorithm</b>: {{ algorithm_name }}</li>
+	</ul>
+</section>
+<br>
+- <b>MaxSkew@1000</b>: Measures the maximum overrepresentation of any group in the top-1000 results relative to the uniform target distribution. Lower values indicate less group overrepresentation.<br>
+- <b>NDKL@1000</b>: Measures how much the cumulative group distribution at each rank in the top-1000 results deviates from the uniform distribution, using a logarithmic discount to give higher ranks more weight. Lower values indicate more balanced group representation.<br><br>
+
+{% for task in tasks %}
+<h2>Protected attribute: {{ task.protected }}</h2>
+<section>
+	<div class="table-wrapper">
+		<table>
+			<thead>
+				<tr>
+					<th>Metric</th>
+					<th>Original CLIP</th>
+					<th>RG-TTA</th>
+				</tr>
+			</thead>
+			<tbody>
+				{% for row in task.rows %}
+				<tr>
+					<td>{{ row.name }}</td>
+					{% if row.original <= row.mitigated %}
+						<td><b>{{ row.original }}</b></td>
+						<td>{{ row.mitigated }}</td>
+					{% else %}
+						<td>{{ row.original }}</td>
+						<td><b>{{ row.mitigated }}</b></td>
+					{% endif %}
+				</tr>
+				{% endfor %}
+			</tbody>
+		</table>
+	</div>
+</section>
+{% endfor %}
+{% endblock %}
