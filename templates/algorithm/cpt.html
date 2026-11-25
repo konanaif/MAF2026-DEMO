@@ -141,6 +141,12 @@ The algorithm explores the causal path for each sample's model decision within a
 				<td colspan="3">제외 — 모델이 원래 답을 틀려 인과 경로를 추적하지 않음</td>
 				{% elif status == "failed" %}
 				<td colspan="3">추적에 실패했습니다: {{ job.error }} (시작 {{ job.started }}). 다른 인덱스를 시도해 주세요.</td>
+				{% elif status == "full" %}
+				<td colspan="3">추적 대기열이 가득 찼습니다(최대 {{ max_active }}건). 진행 중인 추적이 끝난 뒤 다시 시도해 주세요.</td>
+				{% elif status == "busy" %}
+				<td colspan="3">이 브라우저에서 시작한 추적(ImageNet val #{{ active_idx }})이 아직 진행 중입니다. 끝난 뒤 다시 시도해 주세요.</td>
+				{% elif status == "idle" %}
+				<td colspan="3">저장된 추적 결과가 없습니다. 인덱스 입력 화면에서 Trace 를 눌러 추적을 시작해 주세요.</td>
 				{% else %}
 				<td colspan="3">추적 중: 시작 {{ job.started }}, 경과 {{ elapsed_min }}분. 이 페이지는 60초마다 자동 새로고침됩니다.</td>
 				{% endif %}

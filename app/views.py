@@ -1,6 +1,6 @@
 from django.shortcuts import render, redirect
 from django.urls import reverse
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from django.http import HttpResponse
 import numpy as np
 
@@ -248,6 +248,70 @@ def _start_vision_trace(sample_idx):
     t.start()
 
 
+# 요청 1건이 GPU 15~40분을 예약하므로 실행 1 + 대기 2 로 묶는다(초과분은 거절)
+_VISION_MAX_ACTIVE = 3
+_VISION_MAX_FAILED = 50
+_VISION_STATE_LOCK = threading.Lock()
+
+
+def _prune_vision_jobs():
+    failed = [i for i, j in _VISION_JOBS.items() if j.get("error")]
+    for i in failed[: max(0, len(failed) - _VISION_MAX_FAILED)]:
+        _VISION_JOBS.pop(i, None)
+    for i in [
+        i
+        for i, t in _VISION_WATCHERS.items()
+        if i not in _VISION_JOBS and not t.is_alive()
+    ]:
+        _VISION_WATCHERS.pop(i, None)
+
+
+def _request_vision_trace(idx, session, allowed):
+    """조회와 시작을 한 락에서 처리하고 화면 상태를 돌려준다.
+
+    allowed 는 CSRF 검증된 인덱스 제출 직후 한 번만 참이다(새로고침·직접 GET 은 조회만).
+    """
+    log = logging.getLogger(__name__)
+    with _VISION_STATE_LOCK:
+        job = _VISION_JOBS.get(idx)
+        if job is not None:
+            return "failed" if job.get("error") else "running"
+        orphan = _find_trace_pid(idx)
+        if orphan:
+            _adopt_vision_trace(idx, orphan)
+            return "running"
+        if not allowed:
+            return "idle"
+        active = [i for i, j in _VISION_JOBS.items() if not j.get("error")]
+        mine = session.get("vision_active_idx")
+        if mine in active:
+            log.warning("vision trace %s refused: session already runs %s", idx, mine)
+            return "busy"
+        if len(active) >= _VISION_MAX_ACTIVE:
+            log.warning("vision trace %s refused: queue full %s", idx, active)
+            return "full"
+        _prune_vision_jobs()
+        _start_vision_trace(idx)
+        session["vision_active_idx"] = idx
+        return "running"
+
+
+_VISION_PREDICT_LOCK = threading.Lock()
+_VISION_PRED_CACHE = {}
+_VISION_PRED_CACHE_MAX = 256
+
+
+def _predict_vision(idx):
+    """새로고침마다 GPU 모델을 다시 올리지 않도록 직렬화하고 인덱스별로 캐시한다."""
+    with _VISION_PREDICT_LOCK:
+        if idx not in _VISION_PRED_CACHE:
+            prediction = predict_vision_cpt(idx)
+            if len(_VISION_PRED_CACHE) >= _VISION_PRED_CACHE_MAX:
+                _VISION_PRED_CACHE.pop(next(iter(_VISION_PRED_CACHE)))
+            _VISION_PRED_CACHE[idx] = prediction
+        return _VISION_PRED_CACHE[idx]
+
+
 def _parse_vision_index(text):
     text = (text or "").strip()
     if not text:
@@ -373,23 +437,34 @@ def select_algorithm(request, data_type, data_name):
         )
 
 
+@csrf_protect
+def _submit_vision_index(request):
+    """추적을 예약하는 유일한 입구라 csrf_exempt 인 바깥 뷰와 달리 토큰을 검증한다."""
+    form_ctx = {"result_url": request.path, "default_idx": DEFAULT_VISION_SAMPLE}
+    try:
+        idx = _parse_vision_index(request.POST["sample_idx"])
+    except ValueError as e:
+        return render(
+            request,
+            "algorithm/get_data_cpt_vision.html",
+            dict(form_ctx, error=str(e)),
+        )
+    request.session["vision_sample_idx"] = idx
+    request.session["vision_trace_ok"] = idx
+    return render(request, "mitigation_loading.html", {"algorithm_name": "cpt"})
+
+
 @csrf_exempt
 def load_mitigation(request, data_name, algorithm_name):
     if algorithm_name == "cpt":
         # 알고리즘 선택 → 인덱스 입력 페이지 → (sample_idx 와 함께 다시 POST) → 로딩
-        form_ctx = {"result_url": request.path, "default_idx": DEFAULT_VISION_SAMPLE}
         if "sample_idx" not in request.POST:
+            form_ctx = {
+                "result_url": request.path,
+                "default_idx": DEFAULT_VISION_SAMPLE,
+            }
             return render(request, "algorithm/get_data_cpt_vision.html", form_ctx)
-        try:
-            request.session["vision_sample_idx"] = _parse_vision_index(
-                request.POST["sample_idx"]
-            )
-        except ValueError as e:
-            return render(
-                request,
-                "algorithm/get_data_cpt_vision.html",
-                dict(form_ctx, error=str(e)),
-            )
+        return _submit_vision_index(request)
     return render(
         request, "mitigation_loading.html", {"algorithm_name": algorithm_name}
     )
@@ -500,30 +575,22 @@ def get_mitigation_result(request, data_name: str, algorithm_name: str):
     if algorithm_name == "cpt":
         idx = request.session.get("vision_sample_idx", DEFAULT_VISION_SAMPLE)
         prediction, error = None, None
+        allowed = request.session.pop("vision_trace_ok", None) == idx
         try:
-            prediction = predict_vision_cpt(idx)
+            prediction = _predict_vision(idx)
         except ValueError as e:
             error = str(e)
         except (OSError, RuntimeError):
             logging.getLogger(__name__).exception("cpt predict_vision_cpt failed")
             error = "비전판 예측에 실패했습니다. ImageNet·모델 파일과 서버 로그를 확인해 주세요."
         cached = _cpt_vision_cached(idx) if prediction else None
-        job = _VISION_JOBS.get(idx)
         status = "idle"
         if prediction and cached is None:
             if not prediction["correct"]:
                 status = "excluded"
-            elif job is None:
-                orphan = _find_trace_pid(idx)
-                if orphan:
-                    _adopt_vision_trace(idx, orphan)
-                else:
-                    _start_vision_trace(idx)
-                job, status = _VISION_JOBS.get(idx), "running"
-            elif job.get("error"):
-                status = "failed"
             else:
-                status = "running"
+                status = _request_vision_trace(idx, request.session, allowed)
+        job = _VISION_JOBS.get(idx)
         now = datetime.datetime.now(_KST)
         elapsed_min = None
         if job and job.get("started"):
@@ -548,6 +615,8 @@ def get_mitigation_result(request, data_name: str, algorithm_name: str):
                 "vision": cached,
                 "status": status,
                 "job": job,
+                "active_idx": request.session.get("vision_active_idx"),
+                "max_active": _VISION_MAX_ACTIVE,
                 "error": error,
             },
         )
