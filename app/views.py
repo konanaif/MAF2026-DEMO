@@ -829,7 +829,7 @@ def get_textdata(request, algorithm_name: str):
 @csrf_exempt
 def processing_text_algorithms(request, algorithm_name: str):
     redirect_path = f"text/mitigation/{algorithm_name}/getresult/"
-    if algorithm_name in ["concse", "ember", "sae"]:  # 입력 없는 알고리즘
+    if algorithm_name in ["concse", "ember", "sae"]:
         return render(request, "text_mitigation_loading.html")
 
     if algorithm_name == "cpt":
