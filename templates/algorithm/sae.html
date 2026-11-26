@@ -1,0 +1,64 @@
+{% extends "common/base.html" %}
+{% load static %}
+
+{% block header_content %}
+	<ul>
+		<li><a href="/app">Home</a></li>
+		<li><a href="/app/datatype">Data</a></li>
+		<li><a href="#">Metrics</a></li>
+		<li><a href="/app/datatype/text/">Algorithms</a></li>
+		<li><a href="#" class="active">Result</a></li>
+	</ul>
+{% endblock %}
+
+{% block body_content %}
+<b>SAE (Safety-Aware Ensembling)</b> classifies broadcast sentences as toxic or non-toxic with KLUE RoBERTa-base and compares four training methods: Base, Base+SWA (stochastic weight averaging), FairBatch (fairness-aware batch sampling) and LEACE+SWA (concept erasure of protected-attribute information on top of SWA).
+All four methods are trained once on broadcast text built from AI Hub 71557 (news scripts) and AI Hub 591 (broadcast scripts) with silver labels, and evaluated on the same test split. The result of that run is saved and shown on every request; training runs again only when no saved result exists.
+<br>
+- <b>Argmax decision</b>: no threshold; a sentence is toxic when its toxic logit is larger than the non-toxic logit.
+<br>
+- <b>Calibrated decision</b>: the same model with a threshold; a sentence is toxic when its toxic probability is at or above the threshold chosen on the dev split for that method.
+<br>
+- <b>Toxic F1 / Macro F1 / FPR</b>: F1 of the toxic class, the mean F1 of both classes, and the share of non-toxic sentences flagged as toxic (lower is better).
+<br><br>
+
+<h1 class="major">Results</h1>
+{% if error %}
+	<section>
+		<p><b>실행할 수 없습니다.</b> {{ error }}</p>
+		<p><a href="/app/datatype/text/" class="button">알고리즘 선택으로</a></p>
+	</section>
+{% endif %}
+{% if result %}
+<section>
+	<ul class="alt">
+		<li><b>Data</b>: train {{ result.data.train }} / dev {{ result.data.dev }} / test {{ result.data.test }}</li>
+		<li><b>Model</b>: klue/roberta-base, trained four ways</li>
+		<li><b>Trained</b>: {% if result.trained_at %}{{ result.trained_at }}, {% endif %}{{ result.elapsed_seconds|floatformat:0 }} s (saved result)</li>
+	</ul>
+</section>
+	{% for table in tables %}
+	<section>
+		<h3>{{ table.title }}</h3>
+		<div class="table-wrapper">
+			<table>
+				<thead>
+					<tr>
+						<th>Metric</th>
+						{% for label in labels %}<th>{{ label }}</th>{% endfor %}
+					</tr>
+				</thead>
+				<tbody>
+					{% for row in table.rows %}
+					<tr>
+						<td>{{ row.label }}</td>
+						{% for cell in row.cells %}<td>{% if cell.bold %}<b>{{ cell.text }}</b>{% else %}{{ cell.text }}{% endif %}</td>{% endfor %}
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	</section>
+	{% endfor %}
+{% endif %}
+{% endblock %}

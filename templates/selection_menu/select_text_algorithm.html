@@ -106,6 +106,16 @@
 				</label>
 			</div>
 		</li>
+		<li>
+			<div class="col-4 col-12-small">
+					<input type="radio" id="sae" name="algorithm" value="sae">
+					<label class="tooltip" for="sae">SAE (Safety-Aware Ensembling)
+						<span class="tooltiptext tooltip-right">
+						SAE trains a KLUE RoBERTa-base broadcast toxicity classifier four ways (Base, Base+SWA, FairBatch, LEACE+SWA) and compares them on the same test split. The saved result of one training run is shown; training runs only when no saved result exists.
+					</span>
+				</label>
+			</div>
+		</li>
 	</ul>
 	<div class="col-12">
 		<input type="submit" onclick="submitForm()" value="Check Result" class="primary" />
@@ -117,7 +127,7 @@ function submitForm(){
 	const selectedData = document.querySelector('input[name="algorithm"]:checked');
 	if (selectedData){
 		let redirect_url;
-		if (selectedData.value == "concse" || selectedData.value == "ember"){
+		if (selectedData.value == "concse" || selectedData.value == "ember" || selectedData.value == "sae"){
 			redirect_url = '/app/text/mitigation/'+selectedData.value+'/loading/';
 		}
 		else{
