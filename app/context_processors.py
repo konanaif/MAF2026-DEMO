@@ -46,6 +46,7 @@ ALGORITHM_NAME2ID = {
     "BBG": "bbg",
     "ConCSE": "concse",
     "KoBBQSteer": "kobbqsteer",
+    "SAE": "sae",
 }
 
 ALGORITHM_ID2NAME = {

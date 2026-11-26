@@ -26,6 +26,14 @@ from MAF.benchmark.kobbq.kobbq_demo import check_korean_bias, KoBBQArguments
 from MAF.benchmark.bbg.bbg_demo import BBGArguments, run_bbg_pipeline
 from MAF.algorithms.inprocessing.kobbq_steer.demo import MAX_CHARS, compare_sample
 from MAF.algorithms.inprocessing.deemc.demo import Lambda0Missing, compare_lambda
+from MAF.algorithms.inprocessing.sae.demo import (
+    COUNT_KEYS as _KB_COUNT_KEYS,
+    HIGHER_BETTER as _KB_HIGHER_BETTER,
+    METHOD_LABELS as _KB_LABELS,
+    METHODS as _KB_METHODS,
+    METRIC_KEYS as _KB_METRIC_KEYS,
+    run_demo,
+)
 from MAF.algorithms.postprocessing.casual_path_tracing.CausalPathTracing import (
     DEFAULT_CPT_SAMPLES,
     MAX_CPT_SAMPLES,
@@ -856,7 +864,7 @@ def get_textdata(request, algorithm_name: str):
 @csrf_exempt
 def processing_text_algorithms(request, algorithm_name: str):
     redirect_path = f"text/mitigation/{algorithm_name}/getresult/"
-    if algorithm_name in ["concse", "ember"]:
+    if algorithm_name in ["concse", "ember", "sae"]:
         return render(request, "text_mitigation_loading.html")
 
     if algorithm_name == "cpt":
@@ -935,9 +943,101 @@ def processing_text_algorithms(request, algorithm_name: str):
             return render(request, "text_mitigation_loading.html")
 
 
+_KB_METRIC_LABELS = {
+    "accuracy": "Accuracy", "toxic_f1": "Toxic F1", "macro_f1": "Macro F1",
+    "precision": "Precision", "recall": "Recall", "fpr": "FPR",
+}  # fmt: skip
+
+
+def _sae_rows(block, thresholds=None):
+    """표 한 블록(argmax 또는 calibrated)의 행: 건수 행·(임계값 행)·지표 6행, 4기법 중 최선 bold."""
+    cells = lambda texts, bold=(): [
+        {"text": t, "bold": i in bold} for i, t in enumerate(texts)
+    ]
+    rows = [
+        {
+            "label": "TN / FP / FN / TP",
+            "cells": cells(
+                [
+                    " / ".join(str(block[m][k]) for k in _KB_COUNT_KEYS)
+                    if m in block
+                    else "-"
+                    for m in _KB_METHODS
+                ]
+            ),
+        }
+    ]
+    if thresholds is not None:
+        rows.append(
+            {
+                "label": "Threshold",
+                "cells": cells(
+                    [
+                        f"{thresholds[m]:.4f}" if thresholds.get(m) is not None else "-"
+                        for m in _KB_METHODS
+                    ]
+                ),
+            }
+        )
+    for key in _KB_METRIC_KEYS:
+        values = [block[m].get(key) if m in block else None for m in _KB_METHODS]
+        valid = [v for v in values if v is not None]
+        best = (
+            (max(valid) if key in _KB_HIGHER_BETTER else min(valid)) if valid else None
+        )
+        bold = {i for i, v in enumerate(values) if v is not None and v == best}
+        rows.append(
+            {
+                "label": _KB_METRIC_LABELS[key],
+                "cells": cells(
+                    [f"{v:.4f}" if v is not None else "-" for v in values], bold
+                ),
+            }
+        )
+    return rows
+
+
 @csrf_exempt
 def show_text_algorithm_result(request, algorithm_name: str):
     html_path = f"algorithm/{algorithm_name}.html"
+    if algorithm_name == "sae":
+        # SAE(Safety-Aware Ensembling). 저장된 결과가 없을 때만 네 기법을 학습(D-81).
+        # 오류 문구에 절대경로가 섞이므로 전부 로그+일반 문구
+        result, error = None, None
+        try:
+            result = run_demo(device="auto")
+        except Exception:
+            logging.getLogger(__name__).exception("sae run_demo failed")
+            error = (
+                "SAE 학습·평가에 실패했습니다. 데이터(data/sae)·"
+                "모델(model/sae)·GPU 와 서버 로그를 확인해 주세요."
+            )
+        tables = []
+        if result:
+            tables = [
+                {
+                    "title": "A. Argmax decision",
+                    "rows": _sae_rows(result["argmax"]),
+                },
+                {
+                    "title": "B. Calibrated decision",
+                    "rows": _sae_rows(
+                        result["calibrated"], result["threshold"]
+                    ),
+                },
+            ]
+        return render(
+            request,
+            html_path,
+            {
+                "algorithm_name": "SAE",
+                "labels": [_KB_LABELS[m] for m in _KB_METHODS],
+                "result": result,
+                "tables": tables,
+                "error": error,
+            },
+        )
+
     if algorithm_name == "concse":
         result = inprocessing.concse.mitigate_concse(base_model="mbert_uncased")
         return render(
